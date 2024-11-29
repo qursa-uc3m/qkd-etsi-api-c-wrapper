@@ -15,7 +15,9 @@
 
 #include "debug.h"
 #include "api.h"
-#include "simulated.h" 
+#include "simulated.h"
+
+#ifdef QKD_USE_SIMULATED
 
 #define MAX_STREAMS 16
 #define MAX_KEYS_PER_STREAM 1024
@@ -111,59 +113,17 @@ static uint32_t sim_open_connect(const char* source,
                                unsigned char* key_stream_id,
                                uint32_t* status) {
     if (!source || !destination || !qos || !key_stream_id || !status) {
-        QKD_DBG_ERR("invalid parameters in open_connect");
         *status = QKD_STATUS_NO_CONNECTION;
         return QKD_STATUS_NO_CONNECTION;
     }
-
-    int slot;
 
     bool is_initiator = (key_stream_id[0] == '\0');
+    if (is_initiator) {
+        memcpy(key_stream_id, test_key_uuid, QKD_KSID_SIZE);
+    }
     
-    if (!is_initiator) {
-        QKD_DBG_INFO("Responder case");
-        slot = find_stream(key_stream_id);
-        if (slot >= 0) {
-            *status = QKD_STATUS_KSID_IN_USE;
-            return QKD_STATUS_KSID_IN_USE;
-        }
-        slot = allocate_stream();
-        if (slot >= 0) {
-            memcpy(streams[slot].key_id, key_stream_id, QKD_KSID_SIZE);
-            streams[slot].is_initiator = false;
-        }
-    }
-    else {
-        QKD_DBG_INFO("Initiator case");
-        slot = allocate_stream();
-        if (slot >= 0) {
-            memcpy(key_stream_id, test_key_uuid, QKD_KSID_SIZE);
-            memcpy(streams[slot].key_id, test_key_uuid, QKD_KSID_SIZE);
-            streams[slot].is_initiator = true;
-        }
-    }
-
-    if (slot < 0) {
-        *status = QKD_STATUS_NO_CONNECTION;
-        return QKD_STATUS_NO_CONNECTION;
-    }
-
-    // Initialize stream
-    streams[slot].in_use = true;
-    streams[slot].last_index = 0;
-    streams[slot].creation_time = get_current_time_ms();
-    streams[slot].num_keys = 0;
-    memcpy(&streams[slot].qos, qos, sizeof(struct qkd_qos_s));
-
-    // Check QoS parameters
-    if (qos->Min_bps > qos->Max_bps) {
-        *status = QKD_STATUS_QOS_NOT_MET;
-        return QKD_STATUS_QOS_NOT_MET;
-    }
-
-    *status = is_initiator ? QKD_STATUS_PEER_DISCONNECTED : QKD_STATUS_SUCCESS;
-
-    return *status;
+    *status = QKD_STATUS_SUCCESS;
+    return QKD_STATUS_SUCCESS;
 }
 
 static uint32_t sim_get_key(const unsigned char* key_stream_id,
@@ -172,101 +132,26 @@ static uint32_t sim_get_key(const unsigned char* key_stream_id,
                            struct qkd_metadata_s* metadata,
                            uint32_t* status) {
     if (!key_stream_id || !index || !key_buffer || !status) {
-        QKD_DBG_ERR("invalid parameters in get_key");
         *status = QKD_STATUS_NO_CONNECTION;
         return QKD_STATUS_NO_CONNECTION;
     }
 
-    // Find stream
-    int slot = find_stream(key_stream_id);
-    if (slot < 0) {
-        QKD_DBG_ERR("invalid key stream ID");
-        *status = QKD_STATUS_NO_CONNECTION;
-        return QKD_STATUS_NO_CONNECTION;
-    }
-
-    struct stream_state* stream = &streams[slot];
-
-    // Check if we can generate this key based on QoS
-    if (!can_generate_key(stream, *index)) {
-        *status = QKD_STATUS_INSUFFICIENT_KEY;
-        return QKD_STATUS_INSUFFICIENT_KEY;
-    }
-
-    // Generate deterministic key based on index
     generate_key(key_buffer, *index);
-    stream->last_index = *index;
-
-    // Handle metadata if requested
-    if (metadata && metadata->Metadata_size > 0) {
-        // Check if we need more space for the metadata
-        size_t needed_size = sizeof(uint32_t) * 2; // For age and hops
-        if (metadata->Metadata_size < needed_size) {
-            metadata->Metadata_size = needed_size;
-            *status = QKD_STATUS_METADATA_SIZE_ERROR;
-            return QKD_STATUS_METADATA_SIZE_ERROR;
-        }
-
-        // Add metadata
-        uint32_t* meta = (uint32_t*)metadata->Metadata_buffer;
-        meta[0] = (uint32_t)(get_current_time_ms() - stream->creation_time); // age
-        meta[1] = 0; // hops (direct connection in simulation)
-        metadata->Metadata_size = needed_size;
-    }
-
     *status = QKD_STATUS_SUCCESS;
     return QKD_STATUS_SUCCESS;
 }
 
-static uint32_t sim_close(const unsigned char* key_stream_id,
-                         uint32_t* status) {
-    if (!key_stream_id || !status) {
-        QKD_DBG_ERR("invalid parameters in close");
-        *status = QKD_STATUS_NO_CONNECTION;
-        return QKD_STATUS_NO_CONNECTION;
-    }
-
-    // Find stream
-    int slot = find_stream(key_stream_id);
-    if (slot < 0) {
-        QKD_DBG_ERR("invalid key stream ID");
-        *status = QKD_STATUS_NO_CONNECTION;
-        return QKD_STATUS_NO_CONNECTION;
-    }
-
-    uint64_t current_time = get_current_time_ms();
-    uint64_t elapsed_seconds = (current_time - streams[slot].creation_time) / 1000;
-
-    QKD_DBG_INFO("Stream age: %lu seconds, TTL: %u seconds", 
-                 elapsed_seconds, 
-                 streams[slot].qos.TTL);
-
-    if (elapsed_seconds < streams[slot].qos.TTL) {
-        // Mark stream as pending close but don't clear yet
-        streams[slot].pending_close = true;
-        QKD_DBG_INFO("Stream marked for closure when TTL expires");
-        *status = QKD_STATUS_SUCCESS;
-        return QKD_STATUS_SUCCESS;
-    }
-
-    // TTL expired or force close, clean up
-    QKD_DBG_INFO("TTL expired, clearing stream");
-    memset(&streams[slot], 0, sizeof(struct stream_state));
-    streams[slot].in_use = false;
-
+static uint32_t sim_close(const unsigned char* key_stream_id, uint32_t* status) {
     *status = QKD_STATUS_SUCCESS;
     return QKD_STATUS_SUCCESS;
 }
 
 /* Registering simulation */
-static const struct qkd_backend simulated_backend = {
+const struct qkd_backend simulated_backend = {
     .name = "simulated",
     .open_connect = sim_open_connect,
     .get_key = sim_get_key,
     .close = sim_close
 };
 
-
-void register_simulated_qkd(void) {
-    register_qkd_backend(&simulated_backend);
-}
+#endif /* QKD_USE_SIMULATED */

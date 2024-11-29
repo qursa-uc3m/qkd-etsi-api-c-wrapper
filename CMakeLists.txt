@@ -8,6 +8,8 @@ if(NOT CMAKE_BUILD_TYPE)
     set(CMAKE_BUILD_TYPE Release)
 endif()
 
+set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+
 find_package(OpenSSL REQUIRED)
 
 option(QKD_DEBUG_LEVEL "Set debug verbosity (1-4)" 0)
@@ -78,5 +80,6 @@ install(FILES
     include/api.h
     include/debug.h
     include/simulated.h
+    include/cerberis_xgr.h
     DESTINATION include/qkd-etsi-api
 )

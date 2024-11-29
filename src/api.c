@@ -14,15 +14,15 @@
 #include "api.h"
 #include "debug.h"
 
+#ifdef QKD_USE_SIMULATED
+#include "simulated.h"
+static const struct qkd_backend *active_backend = &simulated_backend;
+#elif defined(QKD_USE_CERBERIS_XGR)
+#include "cerberis_xgr.h"
+static const struct qkd_backend *active_backend = &cerberis_xgr_backend;
+#else
 static const struct qkd_backend *active_backend = NULL;
-
-void register_qkd_backend(const struct qkd_backend *backend) {
-    active_backend = backend;
-}
-
-const struct qkd_backend* get_active_backend(void) {
-    return active_backend;
-}
+#endif
 
 uint32_t OPEN_CONNECT(const char* source, const char* destination,
                      struct qkd_qos_s* qos,

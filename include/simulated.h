@@ -14,6 +14,10 @@
 #ifndef QKD_ETSI_SIMULATED_H_
 #define QKD_ETSI_SIMULATED_H_
 
-void register_simulated_qkd(void);
+#ifdef QKD_USE_SIMULATED
+
+extern const struct qkd_backend simulated_backend;
 
 #endif /* QKD_ETSI_SIMULATED_H_ */
+
+#endif /* QKD_USE_SIMULATED */

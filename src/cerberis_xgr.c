@@ -15,8 +15,9 @@
 
 #include "debug.h"
 #include "api.h"
+#include "cerberis_xgr.h"
 
-static bool connection_established = false;
+#ifdef QKD_USE_CERBERIS_XGR
 
 static uint32_t cerberis_xgr_open_connect(const char* source, 
                                   const char* destination,
@@ -30,7 +31,6 @@ static uint32_t cerberis_xgr_open_connect(const char* source,
    }
 
    // TODO: backend would connect to Cerberis XGR hardware here
-   connection_established = false;
    QKD_DBG_ERR("Cerberis XGR backend not available");
    *status = QKD_STATUS_NO_CONNECTION;
    return QKD_STATUS_NO_CONNECTION;
@@ -43,12 +43,6 @@ static uint32_t cerberis_xgr_get_key(const unsigned char* key_stream_id,
                               uint32_t* status) {
    if (!key_stream_id || !index || !key_buffer || !status) {
        QKD_DBG_ERR("invalid parameters in get_key");
-       *status = QKD_STATUS_NO_CONNECTION;
-       return QKD_STATUS_NO_CONNECTION;
-   }
-
-   if (!connection_established) {
-       QKD_DBG_ERR("connection not established");
        *status = QKD_STATUS_NO_CONNECTION;
        return QKD_STATUS_NO_CONNECTION;
    }
@@ -67,7 +61,6 @@ static uint32_t cerberis_xgr_close(const unsigned char* key_stream_id,
        return QKD_STATUS_NO_CONNECTION;
    }
 
-   connection_established = false;
    QKD_DBG_INFO("connection closed");
    *status = QKD_STATUS_SUCCESS;
    return QKD_STATUS_SUCCESS;
@@ -81,6 +74,4 @@ static const struct qkd_backend cerberis_xgr_backend = {
    .close = cerberis_xgr_close
 };
 
-void register_cerberis_xgr_qkd(void) {
-   register_qkd_backend(&cerberis_xgr_backend);
-}
+#endif /* QKD_USE_CERBERIS_XGR */

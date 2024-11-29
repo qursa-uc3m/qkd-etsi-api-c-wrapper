@@ -153,9 +153,6 @@ static void test_get_key(void) {
 int main(void) {
     printf("Running QKD ETSI API tests...\n\n");
 
-    // Register the simulated backend
-    register_simulated_qkd();
-
     // Run all tests
     test_open_connect_close();
     test_get_key();
