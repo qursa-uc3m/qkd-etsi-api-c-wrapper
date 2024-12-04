@@ -4,7 +4,7 @@
  *
  * Authors:
  * - Javier Blanco-Romero (@fj-blanco) - UC3M
- * 
+ *
  */
 
 /*

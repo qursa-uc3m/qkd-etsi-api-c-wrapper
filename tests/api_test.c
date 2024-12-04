@@ -10,49 +10,42 @@
  * tests/api_test.c
  */
 
-#include <stdio.h>
-#include <assert.h>
-#include <string.h>
-#include <unistd.h>
 #include "api.h"
 #include "simulated.h"
+#include <assert.h>
+#include <stdio.h>
+#include <string.h>
+#include <unistd.h>
 
 /* Helper function to simulate peer connection */
-static void simulate_peer_connection(const unsigned char* ksid) {
+static void simulate_peer_connection(const unsigned char *ksid) {
     uint32_t status;
-    struct qkd_qos_s peer_qos = {
-        .Key_chunk_size = QKD_KEY_SIZE,
-        .Max_bps = 1000,
-        .Min_bps = 100,
-        .jitter = 10,
-        .priority = 1,
-        .timeout = 1000,
-        .TTL = 1
-    };
-    
+    struct qkd_qos_s peer_qos = {.Key_chunk_size = QKD_KEY_SIZE,
+                                 .Max_bps = 1000,
+                                 .Min_bps = 100,
+                                 .jitter = 10,
+                                 .priority = 1,
+                                 .timeout = 1000,
+                                 .TTL = 1};
+
     // Responder connects with existing KSID
-    status = OPEN_CONNECT("qkd://localhost/bob", 
-                         "qkd://localhost/alice",
-                         &peer_qos,
-                         (unsigned char*)ksid,
-                         &status);
+    status = OPEN_CONNECT("qkd://localhost/bob", "qkd://localhost/alice",
+                          &peer_qos, (unsigned char *)ksid, &status);
     assert(status == QKD_STATUS_SUCCESS);
 }
 
 static void test_open_connect_close(void) {
     uint32_t status;
-    struct qkd_qos_s qos = {
-        .Key_chunk_size = QKD_KEY_SIZE,
-        .Max_bps = 1000,
-        .Min_bps = 100,
-        .jitter = 10,
-        .priority = 1,
-        .timeout = 1000,
-        .TTL = 1
-    };
+    struct qkd_qos_s qos = {.Key_chunk_size = QKD_KEY_SIZE,
+                            .Max_bps = 1000,
+                            .Min_bps = 100,
+                            .jitter = 10,
+                            .priority = 1,
+                            .timeout = 1000,
+                            .TTL = 1};
     unsigned char key_stream_id[QKD_KSID_SIZE] = {0};
-    const char* source = "qkd://localhost/alice";
-    const char* destination = "qkd://localhost/bob";
+    const char *source = "qkd://localhost/alice";
+    const char *destination = "qkd://localhost/bob";
 
     printf("Testing OPEN_CONNECT/CLOSE...\n");
 
@@ -78,7 +71,8 @@ static void test_open_connect_close(void) {
     // Test 5: Test QoS validation
     struct qkd_qos_s invalid_qos = qos;
     invalid_qos.Min_bps = 2000; // Higher than Max_bps
-    status = OPEN_CONNECT(source, destination, &invalid_qos, key_stream_id, &status);
+    status =
+        OPEN_CONNECT(source, destination, &invalid_qos, key_stream_id, &status);
     assert(status == QKD_STATUS_QOS_NOT_MET);
     printf("  QoS validation: PASS\n");
 
@@ -96,22 +90,20 @@ static void test_open_connect_close(void) {
 
 static void test_get_key(void) {
     uint32_t status;
-    struct qkd_qos_s qos = {
-        .Key_chunk_size = QKD_KEY_SIZE,
-        .Max_bps = 1000,
-        .Min_bps = 100,
-        .jitter = 10,
-        .priority = 1,
-        .timeout = 1000,
-        .TTL = 1
-    };
+    struct qkd_qos_s qos = {.Key_chunk_size = QKD_KEY_SIZE,
+                            .Max_bps = 1000,
+                            .Min_bps = 100,
+                            .jitter = 10,
+                            .priority = 1,
+                            .timeout = 1000,
+                            .TTL = 1};
     unsigned char key_stream_id[QKD_KSID_SIZE] = {0};
     unsigned char key_buffer1[QKD_KEY_SIZE];
     unsigned char key_buffer2[QKD_KEY_SIZE];
     uint32_t index = 0;
     struct qkd_metadata_s metadata = {0};
-    const char* source = "qkd://localhost/alice";
-    const char* destination = "qkd://localhost/bob";
+    const char *source = "qkd://localhost/alice";
+    const char *destination = "qkd://localhost/bob";
 
     printf("\nTesting GET_KEY...\n");
 
@@ -148,7 +140,6 @@ static void test_get_key(void) {
     status = CLOSE(key_stream_id, &status);
     assert(status == QKD_STATUS_SUCCESS);
 }
-
 
 int main(void) {
     printf("Running QKD ETSI API tests...\n\n");
