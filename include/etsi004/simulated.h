@@ -8,15 +8,17 @@
  */
 
 /*
- * include/simulated.h
+ * include/etsi004/simulated.h
  */
 
 #ifndef QKD_ETSI_SIMULATED_H_
 #define QKD_ETSI_SIMULATED_H_
 
+#include "qkd_etsi_api.h"
+
 #ifdef QKD_USE_SIMULATED
 
-extern const struct qkd_backend simulated_backend;
+extern const struct qkd_004_backend simulated_backend;
 
 #endif /* QKD_ETSI_SIMULATED_H_ */
 

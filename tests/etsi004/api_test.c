@@ -7,10 +7,10 @@
  */
 
 /*
- * tests/api_test.c
+ * tests/etsi004/api_test.c
  */
 
-#include "api.h"
+#include "etsi004/api.h"
 #include "simulated.h"
 #include <assert.h>
 #include <stdio.h>

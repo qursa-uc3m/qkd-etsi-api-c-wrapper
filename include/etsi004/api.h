@@ -7,7 +7,7 @@
  */
 
 /*
- * include/api.h
+ * include/etsi004/api.h
  */
 
 #ifndef QKD_ETSI_API_H_
@@ -22,20 +22,17 @@
 extern "C" {
 #endif
 
-/* Hardcoded QKD constants */
-#define QKD_KEY_SIZE 32     /* Size of key buffer in bytes */
-#define QKD_KSID_SIZE 16    /* UUID_v4 16 bytes (128 bits) */
-#define QKD_MAX_URI_LEN 256 /* Maximum length for URIs */
-
 /* Status codes as defined in ETSI spec */
 #define QKD_STATUS_SUCCESS 0 /* Successful */
 #define QKD_STATUS_PEER_DISCONNECTED                                           \
     1 /* Successful connection, peer not connected */
-#define QKD_STATUS_INSUFFICIENT_KEY 2   /* GET_KEY failed: insufficient key */
-#define QKD_STATUS_PEER_NOT_CONNECTED 3 /* GET_KEY failed: peer not connected  \
-                                         */
-#define QKD_STATUS_NO_CONNECTION 4      /* No QKD connection available */
-#define QKD_STATUS_KSID_IN_USE 5 /* OPEN_CONNECT failed: QKD_KEY_SIZE in use   \
+#define QKD_STATUS_INSUFFICIENT_KEY 2 /* GET_KEY failed: insufficient key */
+#define QKD_STATUS_PEER_NOT_CONNECTED                                          \
+    3                              /* GET_KEY failed: peer not connected       \
+                                    */
+#define QKD_STATUS_NO_CONNECTION 4 /* No QKD connection available */
+#define QKD_STATUS_KSID_IN_USE                                                 \
+    5                            /* OPEN_CONNECT failed: QKD_KEY_SIZE in use   \
                                   */
 #define QKD_STATUS_TIMEOUT 6     /* TIMEOUT_ERROR */
 #define QKD_STATUS_QOS_NOT_MET 7 /* OPEN failed: QoS not met */
@@ -60,8 +57,8 @@ struct qkd_metadata_s {
     unsigned char *Metadata_buffer; /* Metadata buffer */
 };
 
-/* QKD Backend Interface */
-struct qkd_backend {
+/* ETSI 004 Backend Interface */
+struct qkd_004_backend {
     const char *name; /* Backend identifier */
 
     uint32_t (*open_connect)(const char *source, const char *destination,
@@ -76,10 +73,10 @@ struct qkd_backend {
 };
 
 /* Backend Management Functions */
-void register_qkd_backend(const struct qkd_backend *backend);
-const struct qkd_backend *get_active_backend(void);
+void register_qkd_004_backend(const struct qkd_004_backend *backend);
+const struct qkd_004_backend *get_active_004_backend(void);
 
-/* ETSI API Functions */
+/* ETSI GS QKD 004 API functions */
 uint32_t OPEN_CONNECT(const char *source, const char *destination,
                       struct qkd_qos_s *qos, unsigned char *key_stream_id,
                       uint32_t *status);

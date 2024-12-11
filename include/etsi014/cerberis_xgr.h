@@ -8,14 +8,14 @@
  */
 
 /*
- * include/cerberis_xgr.h
+ * include/etsi014/cerberis_xgr.h
  */
 
 #ifndef QKD_ETSI_CERBERIS_XGR_H_
 #define QKD_ETSI_CERBERIS_XGR_H_
 
 #ifdef QKD_USE_CERBERIS_XGR
-extern const struct qkd_backend cerberis_xgr_backend;
+extern const struct qkd_014_backend cerberis_xgr_backend;
 #endif
 
 #endif /* QKD_ETSI_CERBERIS_XGR_H_ */

@@ -7,15 +7,15 @@
  */
 
 /*
- * src/simulated.c
+ * src/etsi004/simulated.c
  */
 
 #include <openssl/evp.h>
 #include <string.h>
 
-#include "api.h"
 #include "debug.h"
-#include "simulated.h"
+#include "etsi004/api.h"
+#include "etsi004/simulated.h"
 
 #ifdef QKD_USE_SIMULATED
 
@@ -145,9 +145,10 @@ static uint32_t sim_close(const unsigned char *key_stream_id,
 }
 
 /* Registering simulation */
-const struct qkd_backend simulated_backend = {.name = "simulated",
-                                              .open_connect = sim_open_connect,
-                                              .get_key = sim_get_key,
-                                              .close = sim_close};
+const struct qkd_004_backend simulated_backend = {.name = "simulated",
+                                                  .open_connect =
+                                                      sim_open_connect,
+                                                  .get_key = sim_get_key,
+                                                  .close = sim_close};
 
 #endif /* QKD_USE_SIMULATED */

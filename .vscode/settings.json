@@ -1,0 +1,8 @@
+{
+    "files.associations": {
+        "api.h": "c",
+        "debug.h": "c",
+        "simulated.h": "c",
+        "cerberis_xgr.h": "c"
+    }
+}

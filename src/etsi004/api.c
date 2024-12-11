@@ -8,20 +8,20 @@
  */
 
 /*
- * src/api.c
+ * src/etsi004/api.c
  */
 
-#include "api.h"
+#include "etsi004/api.h"
 #include "debug.h"
 
 #ifdef QKD_USE_SIMULATED
-#include "simulated.h"
-static const struct qkd_backend *active_backend = &simulated_backend;
+#include "etsi004/simulated.h"
+static const struct qkd_004_backend *active_backend = &simulated_backend;
 #elif defined(QKD_USE_CERBERIS_XGR)
 #include "cerberis_xgr.h"
-static const struct qkd_backend *active_backend = &cerberis_xgr_backend;
+static const struct qkd_004_backend *active_backend = &cerberis_xgr_backend;
 #else
-static const struct qkd_backend *active_backend = NULL;
+static const struct qkd_004_backend *active_backend = NULL;
 #endif
 
 uint32_t OPEN_CONNECT(const char *source, const char *destination,
