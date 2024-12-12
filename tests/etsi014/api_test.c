@@ -4,6 +4,7 @@
  *
  * Authors:
  * - Javier Blanco-Romero (@fj-blanco) - UC3M
+ * - Pedro Otero-García (@pedrotega) - UVigo
  */
 
 /*
@@ -17,9 +18,19 @@
 #include <string.h>
 
 /* Test configuration */
+#ifdef QKD_USE_CERBERIS_XGR
+static const char *TEST_KME_HOSTNAME = "https://castor.det.uvigo.es:444";
+static const char *TEST_MASTER_SAE = "CONSA";
+static const char *TEST_SLAVE_SAE = "CONSB";
+
+static const char *TEST_PUB_KEY = "../certs/ETSIA.pem";
+static const char *TEST_PRIV_KEY = "../certs/ETSIA-key.pem";
+static const char *TEST_ROOT_KEY = "../certs/ChrisCA.pem";
+#else
 static const char *TEST_KME_HOSTNAME = "localhost:8080";
 static const char *TEST_MASTER_SAE = "SAE_TEST_MASTER";
 static const char *TEST_SLAVE_SAE = "SAE_TEST_SLAVE";
+#endif /* QKD_USE_CERBERIS_XGR */
 
 static void test_get_status(void) {
     qkd_status_t status = {0};
@@ -47,7 +58,7 @@ static void test_get_status(void) {
 }
 
 static void test_get_key(void) {
-    qkd_key_request_t request = {.number = 2,
+    qkd_key_request_t request = {.number = 1, // Nodes are not prepared for multiple key retrivals
                                  .size = 256,
                                  .additional_slave_SAE_IDs = NULL,
                                  .additional_SAE_count = 0,
@@ -60,6 +71,7 @@ static void test_get_key(void) {
 
     // Test 1: Request keys
     result = GET_KEY(TEST_KME_HOSTNAME, TEST_SLAVE_SAE, &request, &container);
+    
     assert(result == QKD_STATUS_OK);
     assert(container.key_count == request.number);
     assert(container.keys != NULL);

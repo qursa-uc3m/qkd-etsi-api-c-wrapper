@@ -4,6 +4,7 @@
  *
  * Authors:
  * - Javier Blanco-Romero (@fj-blanco) - UC3M
+ * - Pedro Otero-García (@pedrotega) - UVigo
  *
  */
 
@@ -18,6 +19,7 @@
 #include "etsi014/simulated.h"
 static const struct qkd_014_backend *active_backend = &simulated_backend;
 #elif defined(QKD_USE_CERBERIS_XGR)
+#include "etsi014/cerberis_xgr.h"
 static const struct qkd_014_backend *active_backend = &cerberis_xgr_backend;
 #else
 static const struct qkd_014_backend *active_backend = NULL;

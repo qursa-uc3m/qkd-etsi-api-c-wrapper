@@ -85,6 +85,10 @@ if(ENABLE_ETSI014)
             src/etsi014/backends/cerberis_xgr.c
         )
         add_compile_definitions(QKD_USE_CERBERIS_XGR)
+        
+        # Adding required libraries to interpret HTTPs req/res
+        set(ADDITIONAL_LIBRARIES curl jansson)
+
     endif()
 
     add_library(qkd-etsi014-api ${ETSI014_SOURCES})
@@ -96,6 +100,7 @@ if(ENABLE_ETSI014)
         PRIVATE
             OpenSSL::Crypto
             OpenSSL::SSL
+            ${ADDITIONAL_LIBRARIES}
     )
     target_compile_definitions(qkd-etsi014-api
         PRIVATE
