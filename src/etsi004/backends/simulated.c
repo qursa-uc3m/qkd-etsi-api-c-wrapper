@@ -7,7 +7,7 @@
  */
 
 /*
- * src/etsi004/simulated.c
+ * src/etsi004/backends/simulated.c
  */
 
 #include <openssl/evp.h>
@@ -15,7 +15,7 @@
 
 #include "debug.h"
 #include "etsi004/api.h"
-#include "etsi004/simulated.h"
+#include "etsi004/backends/simulated.h"
 
 #ifdef QKD_USE_SIMULATED
 

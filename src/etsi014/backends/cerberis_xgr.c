@@ -15,7 +15,7 @@
 
 #include "debug.h"
 #include "etsi014/api.h"
-#include "etsi014/cerberis_xgr.h"
+#include "etsi014/backends/cerberis_xgr.h"
 
 #ifdef QKD_USE_CERBERIS_XGR
 

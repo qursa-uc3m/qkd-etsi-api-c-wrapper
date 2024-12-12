@@ -8,7 +8,7 @@
  */
 
 /*
- * include/etsi004/simulated.h
+ * include/etsi004/backends/simulated.h
  */
 
 #ifndef QKD_ETSI_SIMULATED_H_

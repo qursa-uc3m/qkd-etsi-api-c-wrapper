@@ -10,8 +10,8 @@
  * tests/etsi004/api_test.c
  */
 
+#include "qkd_etsi_api.h"
 #include "etsi004/api.h"
-#include "simulated.h"
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>

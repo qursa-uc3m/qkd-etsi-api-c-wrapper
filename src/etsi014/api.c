@@ -15,7 +15,7 @@
 #include "debug.h"
 
 #ifdef QKD_USE_SIMULATED
-#include "etsi014/simulated.h"
+#include "etsi014/backends/simulated.h"
 static const struct qkd_014_backend *active_backend = &simulated_backend;
 #elif defined(QKD_USE_CERBERIS_XGR)
 static const struct qkd_014_backend *active_backend = &cerberis_xgr_backend;
@@ -40,6 +40,8 @@ uint32_t GET_STATUS(const char *kme_hostname, const char *slave_sae_id,
 
 uint32_t GET_KEY(const char *kme_hostname, const char *slave_sae_id,
                  qkd_key_request_t *request, qkd_key_container_t *container) {
+    // print the active backend name
+    QKD_DBG_INFO("GET_KEY(): Active backend name: %s\n", active_backend->name);
     if (!kme_hostname || !slave_sae_id || !container) {
         QKD_DBG_ERR("Invalid parameters in GET_KEY");
         return QKD_STATUS_BAD_REQUEST;
