@@ -10,8 +10,8 @@
  * include/etsi014/api.h
  */
 
-#ifndef ETSI014_API_H
-#define ETSI014_API_H
+#ifndef QKD_ETSI014_API_H
+#define QKD_ETSI014_API_H
 
 #include <stdint.h>
 
@@ -106,4 +106,4 @@ uint32_t GET_KEY_WITH_IDS(const char *kme_hostname, const char *master_sae_id,
                           qkd_key_ids_t *key_ids,
                           qkd_key_container_t *container);
 
-#endif /* ETSI014_API_H */
+#endif /* QKD_ETSI014_API_H */
