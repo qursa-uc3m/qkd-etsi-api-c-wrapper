@@ -71,7 +71,29 @@ if(ENABLE_ETSI014)
         list(APPEND API_SOURCES 
             src/etsi014/backends/cerberis_xgr.c
         )
+        add_compile_definitions(QKD_USE_CERBERIS_XGR)
+        
+        # Adding required libraries to interpret HTTPs req/res
+        set(ADDITIONAL_LIBRARIES curl jansson)
+
     endif()
+
+    add_library(qkd-etsi014-api ${ETSI014_SOURCES})
+    target_include_directories(qkd-etsi014-api
+        PUBLIC
+            ${COMMON_INCLUDES}
+    )
+    target_link_libraries(qkd-etsi014-api
+        PRIVATE
+            OpenSSL::Crypto
+            OpenSSL::SSL
+            ${ADDITIONAL_LIBRARIES}
+    )
+    target_compile_definitions(qkd-etsi014-api
+        PRIVATE
+            $<$<BOOL:${QKD_DEBUG_LEVEL}>:QKD_DEBUG_LEVEL=${QKD_DEBUG_LEVEL}>
+            ENABLE_ETSI014
+    )
 endif()
 
 # Create unified library
