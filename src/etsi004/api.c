@@ -15,10 +15,10 @@
 #include "debug.h"
 
 #ifdef QKD_USE_SIMULATED
-#include "etsi004/simulated.h"
+#include "etsi004/backends/simulated.h"
 static const struct qkd_004_backend *active_backend = &simulated_backend;
 #elif defined(QKD_USE_CERBERIS_XGR)
-#include "cerberis_xgr.h"
+#include "etsi004/backends/cerberis_xgr.h"
 static const struct qkd_004_backend *active_backend = &cerberis_xgr_backend;
 #else
 static const struct qkd_004_backend *active_backend = NULL;

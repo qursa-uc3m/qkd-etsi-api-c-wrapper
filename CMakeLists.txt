@@ -14,7 +14,6 @@ find_package(OpenSSL REQUIRED)
 
 option(QKD_DEBUG_LEVEL "Set debug verbosity (1-4)" 0)
 option(BUILD_TESTS "Build test programs" OFF)
-
 option(ENABLE_ETSI004 "Enable ETSI 004 API support" ON)
 option(ENABLE_ETSI014 "Enable ETSI 014 API support" ON)
 
@@ -28,60 +27,48 @@ set(COMMON_INCLUDES
 set(QKD_BACKEND "simulated" CACHE STRING "Select QKD backend (simulated, cerberis_xgr)")
 set_property(CACHE QKD_BACKEND PROPERTY STRINGS simulated cerberis_xgr)
 
-# Define sources and includes conditionally based on enabled APIs
+if(QKD_BACKEND STREQUAL "simulated")
+    add_compile_definitions(QKD_USE_SIMULATED)
+elseif(QKD_BACKEND STREQUAL "cerberis_xgr")
+    add_compile_definitions(QKD_USE_CERBERIS_XGR)
+endif()
+
+# Define sources based on enabled APIs
+set(API_SOURCES "")
+
 if(ENABLE_ETSI004)
     list(APPEND COMMON_INCLUDES
         ${CMAKE_CURRENT_SOURCE_DIR}/include/etsi004
+        ${CMAKE_CURRENT_SOURCE_DIR}/include/etsi004/backends
     )
-
-    set(ETSI004_SOURCES
+    list(APPEND API_SOURCES
         src/etsi004/api.c
     )
-
     if(QKD_BACKEND STREQUAL "simulated")
-        list(APPEND ETSI004_SOURCES 
+        list(APPEND API_SOURCES 
             src/etsi004/backends/simulated.c
         )
-        add_compile_definitions(QKD_USE_SIMULATED)
     elseif(QKD_BACKEND STREQUAL "cerberis_xgr")
-        #list(APPEND ETSI004_SOURCES 
-        #    src/etsi004/backends/cerberis_xgr.c
-        #)
-        #add_compile_definitions(QKD_USE_CERBERIS_XGR)
+        list(APPEND API_SOURCES 
+            src/etsi004/backends/cerberis_xgr.c
+        )
     endif()
-
-    add_library(qkd-etsi004-api ${ETSI004_SOURCES})
-    target_include_directories(qkd-etsi004-api
-        PUBLIC
-            ${COMMON_INCLUDES}
-    )
-    target_link_libraries(qkd-etsi004-api
-        PRIVATE
-            OpenSSL::Crypto
-    )
-    target_compile_definitions(qkd-etsi004-api
-        PRIVATE
-            $<$<BOOL:${QKD_DEBUG_LEVEL}>:QKD_DEBUG_LEVEL=${QKD_DEBUG_LEVEL}>
-            ENABLE_ETSI004
-    )
 endif()
 
 if(ENABLE_ETSI014)
     list(APPEND COMMON_INCLUDES
         ${CMAKE_CURRENT_SOURCE_DIR}/include/etsi014
+        ${CMAKE_CURRENT_SOURCE_DIR}/include/etsi014/backends
     )
-
-    set(ETSI014_SOURCES
+    list(APPEND API_SOURCES
         src/etsi014/api.c
     )
-
     if(QKD_BACKEND STREQUAL "simulated")
-        list(APPEND ETSI014_SOURCES 
+        list(APPEND API_SOURCES 
             src/etsi014/backends/simulated.c
         )
-        add_compile_definitions(QKD_USE_SIMULATED)
     elseif(QKD_BACKEND STREQUAL "cerberis_xgr")
-        list(APPEND ETSI014_SOURCES 
+        list(APPEND API_SOURCES 
             src/etsi014/backends/cerberis_xgr.c
         )
         add_compile_definitions(QKD_USE_CERBERIS_XGR)
@@ -109,7 +96,29 @@ if(ENABLE_ETSI014)
     )
 endif()
 
-# Tests with conditional compilation
+# Create unified library
+add_library(qkd-etsi-api SHARED ${API_SOURCES})
+
+target_include_directories(qkd-etsi-api
+    PUBLIC 
+        ${COMMON_INCLUDES}
+)
+
+target_link_libraries(qkd-etsi-api
+    PUBLIC
+        OpenSSL::Crypto
+        OpenSSL::SSL
+)
+
+target_compile_definitions(qkd-etsi-api
+    PRIVATE
+        $<$<BOOL:${QKD_DEBUG_LEVEL}>:QKD_DEBUG_LEVEL=${QKD_DEBUG_LEVEL}>
+        $<$<BOOL:${ENABLE_ETSI004}>:ENABLE_ETSI004>
+        $<$<BOOL:${ENABLE_ETSI014}>:ENABLE_ETSI014>
+        $<$<STREQUAL:${QKD_BACKEND},simulated>:QKD_USE_SIMULATED>
+)
+
+# Tests
 if(BUILD_TESTS)
     enable_testing()
 
@@ -119,7 +128,7 @@ if(BUILD_TESTS)
         )
         target_link_libraries(etsi004_test
             PRIVATE
-                qkd-etsi004-api
+                qkd-etsi-api
         )
         add_test(NAME etsi004_test COMMAND etsi004_test)
     endif()
@@ -130,18 +139,26 @@ if(BUILD_TESTS)
         )
         target_link_libraries(etsi014_test
             PRIVATE
-                qkd-etsi014-api
+                qkd-etsi-api
         )
         add_test(NAME etsi014_test COMMAND etsi014_test)
     endif()
 endif()
 
 # Installation
+install(TARGETS qkd-etsi-api
+    LIBRARY DESTINATION lib
+    ARCHIVE DESTINATION lib
+    PUBLIC_HEADER DESTINATION include/qkd-etsi-api
+)
+
+install(FILES
+    include/debug.h
+    include/qkd_etsi_api.h
+    DESTINATION include/qkd-etsi-api
+)
+
 if(ENABLE_ETSI004)
-    install(TARGETS qkd-etsi004-api
-        LIBRARY DESTINATION lib
-        ARCHIVE DESTINATION lib
-    )
     install(DIRECTORY include/etsi004/
         DESTINATION include/qkd-etsi-api/etsi004
         FILES_MATCHING PATTERN "*.h"
@@ -149,18 +166,8 @@ if(ENABLE_ETSI004)
 endif()
 
 if(ENABLE_ETSI014)
-    install(TARGETS qkd-etsi014-api
-        LIBRARY DESTINATION lib
-        ARCHIVE DESTINATION lib
-    )
     install(DIRECTORY include/etsi014/
         DESTINATION include/qkd-etsi-api/etsi014
         FILES_MATCHING PATTERN "*.h"
     )
 endif()
-
-install(FILES
-    include/debug.h
-    include/qkd_etsi_api.h
-    DESTINATION include/qkd-etsi-api
-)

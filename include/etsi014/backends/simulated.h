@@ -8,16 +8,16 @@
  */
 
 /*
- * include/etsi014/simulated.h
+ * include/etsi014/backends/simulated.h
  */
 
-#ifndef QKD_ETSI_SIMULATED_H_
-#define QKD_ETSI_SIMULATED_H_
+#ifndef QKD_ETSI014_SIMULATED_H_
+#define QKD_ETSI014_SIMULATED_H_
 
 #ifdef QKD_USE_SIMULATED
 
 extern const struct qkd_014_backend simulated_backend;
 
-#endif /* QKD_ETSI_SIMULATED_H_ */
+#endif /* QKD_ETSI014_SIMULATED_H_ */
 
 #endif /* QKD_USE_SIMULATED */

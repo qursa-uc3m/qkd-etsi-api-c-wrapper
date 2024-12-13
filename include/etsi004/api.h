@@ -10,8 +10,8 @@
  * include/etsi004/api.h
  */
 
-#ifndef QKD_ETSI_API_H_
-#define QKD_ETSI_API_H_
+#ifndef QKD_ETSI004_API_H_
+#define QKD_ETSI004_API_H_
 
 /* Required standard headers */
 #include <openssl/evp.h>
@@ -91,4 +91,4 @@ uint32_t CLOSE(const unsigned char *key_stream_id, uint32_t *status);
 }
 #endif
 
-#endif /* QKD_ETSI_API_H_ */
+#endif /* QKD_ETSI004_API_H_ */

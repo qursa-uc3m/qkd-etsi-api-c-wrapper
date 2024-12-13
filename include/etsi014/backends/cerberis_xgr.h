@@ -8,7 +8,7 @@
  */
 
 /*
- * include/etsi014/cerberis_xgr.h
+ * include/etsi014/backends/cerberis_xgr.h
  */
 
 #ifndef QKD_ETSI_CERBERIS_XGR_H_
