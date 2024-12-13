@@ -25,7 +25,11 @@ static const struct qkd_014_backend *active_backend = &cerberis_xgr_backend;
 static const struct qkd_014_backend *active_backend = NULL;
 #endif
 
-uint32_t GET_STATUS(const char *kme_hostname, const char *slave_sae_id,
+uint32_t GET_STATUS(const char *kme_hostname, 
+                    const char *pub_key, 
+                    const char *priv_key, 
+                    const char *root_ca,
+                    const char *slave_sae_id,
                     qkd_status_t *status) {
     if (!kme_hostname || !slave_sae_id || !status) {
         QKD_DBG_ERR("Invalid parameters in GET_STATUS");
@@ -37,10 +41,12 @@ uint32_t GET_STATUS(const char *kme_hostname, const char *slave_sae_id,
         return QKD_STATUS_SERVER_ERROR;
     }
 
-    return active_backend->get_status(kme_hostname, slave_sae_id, status);
+    return active_backend->get_status(kme_hostname, pub_key, priv_key, root_ca, slave_sae_id, status);
 }
 
-uint32_t GET_KEY(const char *kme_hostname, const char *slave_sae_id,
+uint32_t GET_KEY(const char *kme_hostname, 
+                 const char *pub_key, const char *priv_key, const char *root_ca,
+                 const char *slave_sae_id,
                  qkd_key_request_t *request, qkd_key_container_t *container) {
     if (!kme_hostname || !slave_sae_id || !container) {
         QKD_DBG_ERR("Invalid parameters in GET_KEY");
@@ -52,11 +58,15 @@ uint32_t GET_KEY(const char *kme_hostname, const char *slave_sae_id,
         return QKD_STATUS_SERVER_ERROR;
     }
 
-    return active_backend->get_key(kme_hostname, slave_sae_id, request,
-                                   container);
+    return active_backend->get_key(kme_hostname, pub_key, priv_key, root_ca,
+                                   slave_sae_id, request, container);
 }
 
-uint32_t GET_KEY_WITH_IDS(const char *kme_hostname, const char *master_sae_id,
+uint32_t GET_KEY_WITH_IDS(const char *kme_hostname,                           
+                          const char *pub_key, 
+                          const char *priv_key, 
+                          const char *root_ca,
+                          const char *master_sae_id,
                           qkd_key_ids_t *key_ids,
                           qkd_key_container_t *container) {
     if (!kme_hostname || !master_sae_id || !key_ids || !container) {
@@ -70,5 +80,6 @@ uint32_t GET_KEY_WITH_IDS(const char *kme_hostname, const char *master_sae_id,
     }
 
     return active_backend->get_key_with_ids(kme_hostname, master_sae_id,
+                                            pub_key, priv_key, root_ca,
                                             key_ids, container);
 }

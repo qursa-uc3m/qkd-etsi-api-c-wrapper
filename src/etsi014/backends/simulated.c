@@ -47,6 +47,7 @@ static void generate_simulated_key(unsigned char *key) {
 
 /* Backend implementation */
 static uint32_t sim_get_status(const char *kme_hostname,
+                               const char *pub_key, const char *priv_key, const char *root_ca,
                                const char *slave_sae_id, qkd_status_t *status) {
     status->source_KME_ID = strdup(LOCAL_KME_ID);
     status->target_KME_ID = strdup(REMOTE_KME_ID);
@@ -63,7 +64,9 @@ static uint32_t sim_get_status(const char *kme_hostname,
     return QKD_STATUS_OK;
 }
 
-static uint32_t sim_get_key(const char *kme_hostname, const char *slave_sae_id,
+static uint32_t sim_get_key(const char *kme_hostname, 
+                            const char *pub_key, const char *priv_key, const char *root_ca,
+                            const char *slave_sae_id,
                             qkd_key_request_t *request,
                             qkd_key_container_t *container) {
     int num_keys = request ? request->number : 1;
@@ -89,6 +92,9 @@ static uint32_t sim_get_key(const char *kme_hostname, const char *slave_sae_id,
 
 static uint32_t sim_get_key_with_ids(const char *kme_hostname,
                                      const char *master_sae_id,
+                                     const char *pub_key, 
+                                     const char *priv_key, 
+                                     const char *root_ca,
                                      qkd_key_ids_t *key_ids,
                                      qkd_key_container_t *container) {
     container->keys = calloc(key_ids->key_ID_count, sizeof(qkd_key_t));
