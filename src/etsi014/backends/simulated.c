@@ -91,7 +91,6 @@ static uint32_t sim_get_key_with_ids(const char *kme_hostname,
                                     qkd_key_ids_t *key_ids,
                                     qkd_key_container_t *container) {
     return sim_get_key(kme_hostname, master_sae_id, NULL, container);
-
 }
 
 const struct qkd_014_backend simulated_backend = {

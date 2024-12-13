@@ -1,4 +1,4 @@
-/*
+/* 
  * Copyright (C) 2024 QURSA Project
  * SPDX-License-Identifier: MIT
  *
@@ -19,33 +19,39 @@
 
 /* Test configuration */
 #ifdef QKD_USE_CERBERIS_XGR
-static const char *TEST_MKME_HOSTNAME = "localhost:8080";
-static const char *TEST_SKME_HOSTNAME = "localhost:8080";
+static const char *get_required_env(const char *name) {
+    const char *value = getenv(name);
+    if (value == NULL) {
+        fprintf(stderr, "Required environment variable %s is not set\n", name);
+        exit(1);
+    }
+    return value;
+}
 
-static const char *TEST_MPUB_KEY = "/path/to/master/pub/key";
-static const char *TEST_MPRIV_KEY = "/path/to/master/priv/key";
-static const char *TEST_MROOT_CA = "/path/to/master/root/ca/cert";
+static const char *TEST_KME_HOSTNAME;
+static const char *TEST_MASTER_SAE;
+static const char *TEST_SLAVE_SAE;
 
-static const char *TEST_SPUB_KEY = "/path/to/master/pub/key";
-static const char *TEST_SPRIV_KEY = "/path/to/master/priv/key";
-static const char *TEST_SROOT_CA = "/path/to/master/root/ca/cert";
+static void init_test_config(void) {
+    TEST_KME_HOSTNAME = get_required_env("QKD_KME_HOSTNAME");
+    TEST_MASTER_SAE = get_required_env("QKD_MASTER_SAE");
+    TEST_SLAVE_SAE = get_required_env("QKD_SLAVE_SAE");
+    
+    printf("Using configuration:\n");
+    printf("  KME Hostname: %s\n", TEST_KME_HOSTNAME);
+    printf("  Master SAE: %s\n", TEST_MASTER_SAE);
+    printf("  Slave SAE: %s\n", TEST_SLAVE_SAE);
+    printf("\n");
+}
 
-static const char *TEST_MASTER_SAE = "SAE_TEST_MASTER";
-static const char *TEST_SLAVE_SAE = "SAE_TEST_SLAVE";
 #else
-static const char *TEST_MKME_HOSTNAME = "localhost:8080";
-static const char *TEST_SKME_HOSTNAME = "localhost:8080";
-
-static const char *TEST_MPUB_KEY = "/path/to/master/pub/key";
-static const char *TEST_MPRIV_KEY = "/path/to/master/priv/key";
-static const char *TEST_MROOT_CA = "/path/to/master/root/ca/cert";
-
-static const char *TEST_SPUB_KEY = "/path/to/master/pub/key";
-static const char *TEST_SPRIV_KEY = "/path/to/master/priv/key";
-static const char *TEST_SROOT_CA = "/path/to/master/root/ca/cert";
-
+static const char *TEST_KME_HOSTNAME = "localhost:8080";
 static const char *TEST_MASTER_SAE = "SAE_TEST_MASTER";
 static const char *TEST_SLAVE_SAE = "SAE_TEST_SLAVE";
+
+static void init_test_config(void) {
+    // Nothing to initialize for simulated backend
+}
 #endif /* QKD_USE_CERBERIS_XGR */
 
 static void test_get_status(void) {
@@ -55,8 +61,7 @@ static void test_get_status(void) {
     printf("Testing GET_STATUS...\n");
 
     // Test 1: Basic status retrieval
-    result = GET_STATUS(TEST_MKME_HOSTNAME, TEST_MPUB_KEY, TEST_MPRIV_KEY, TEST_MROOT_CA, 
-                        TEST_SLAVE_SAE, &status);
+    result = GET_STATUS(TEST_KME_HOSTNAME, TEST_SLAVE_SAE, &status);
     assert(result == QKD_STATUS_OK);
     assert(status.source_KME_ID != NULL);
     assert(status.target_KME_ID != NULL);
@@ -64,8 +69,7 @@ static void test_get_status(void) {
     printf("  Basic status retrieval: PASS\n");
 
     // Test 2: Invalid parameters
-    result = GET_STATUS(NULL, TEST_MPUB_KEY, TEST_MPRIV_KEY, TEST_MROOT_CA, 
-                        TEST_SLAVE_SAE, &status);
+    result = GET_STATUS(NULL, TEST_SLAVE_SAE, &status);
     assert(result == QKD_STATUS_BAD_REQUEST);
     printf("  NULL parameter handling: PASS\n");
 
@@ -77,21 +81,21 @@ static void test_get_status(void) {
 }
 
 static void test_get_key(void) {
-    qkd_key_request_t request = {.number = 1, // Nodes have to be reconfigurated for multiple key retrivals
-                                 .size = 256,
-                                 .additional_slave_SAE_IDs = NULL,
-                                 .additional_SAE_count = 0,
-                                 .extension_mandatory = NULL,
-                                 .extension_optional = NULL};
+    qkd_key_request_t request = {
+        .number = 1, // Nodes have to be reconfigurated for multiple key retrivals
+        .size = 256,
+        .additional_slave_SAE_IDs = NULL,
+        .additional_SAE_count = 0,
+        .extension_mandatory = NULL,
+        .extension_optional = NULL
+    };
     qkd_key_container_t container = {0};
     uint32_t result;
 
     printf("\nTesting GET_KEY...\n");
 
     // Test 1: Request keys
-    result = GET_KEY(TEST_MKME_HOSTNAME, TEST_MPUB_KEY, TEST_MPRIV_KEY, TEST_MROOT_CA, 
-                     TEST_SLAVE_SAE, &request, &container);
-    
+    result = GET_KEY(TEST_KME_HOSTNAME, TEST_SLAVE_SAE, &request, &container);    
     assert(result == QKD_STATUS_OK);
     assert(container.key_count == request.number);
     assert(container.keys != NULL);
@@ -118,16 +122,13 @@ static void test_get_key(void) {
     // Test 3: Test key retrieval with ID
     qkd_key_id_t key_id = {.key_ID = saved_key_id, .key_ID_extension = NULL};
     qkd_key_ids_t key_ids = {
-        .key_IDs = &key_id, .key_ID_count = 1, .key_IDs_extension = NULL};
+        .key_IDs = &key_id, 
+        .key_ID_count = 1, 
+        .key_IDs_extension = NULL
+    };
 
-    #ifdef QKD_USE_CERBERIS_XGR
-    result = GET_KEY_WITH_IDS(TEST_SKME_HOSTNAME, TEST_SPUB_KEY, TEST_SPRIV_KEY, TEST_SROOT_CA,
-                              TEST_MASTER_SAE, &key_ids,
-                              &container);
-    #else
-    result = GET_KEY_WITH_IDS(TEST_SKME_HOSTNAME, TEST_SPUB_KEY, TEST_SPRIV_KEY, TEST_SROOT_CA, 
-                              TEST_MASTER_SAE, &key_ids, &container);
-    #endif //QKD_USE_CERBERIS_XGR
+    result = GET_KEY_WITH_IDS(TEST_KME_HOSTNAME, TEST_MASTER_SAE, &key_ids,
+                               &container);
     assert(result == QKD_STATUS_OK);
     assert(container.key_count == 1);
     assert(strcmp(saved_key,container.keys[0].key) == 0);
@@ -145,6 +146,8 @@ static void test_get_key(void) {
 
 int main(void) {
     printf("Running QKD ETSI 014 API tests...\n\n");
+
+    init_test_config();
 
     // Run basic tests
     test_get_status();

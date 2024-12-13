@@ -21,6 +21,20 @@ This API implementation has been developed for integrating Quantum Key Distribut
 1. **IPSec Integration**: QKD key management for [strongSwan IPSec](https://github.com/qursa-uc3m/strongswan)
 2. **Post-Quantum Cryptography Hybridization**: Integration with our [QKD-KEM Provider](https://github.com/qursa-uc3m/qkd-kem-provider), a fork of the [Open Quantum Safe Provider](https://github.com/open-quantum-safe/oqs-provider)
 
+## Dependencies
+
+### Required for all builds
+
+- OpenSSL development files (`libssl-dev` on Ubuntu/Debian)
+
+### Additional requirements for cerberis_xgr backend
+
+Ubuntu/Debian:
+
+```bash
+sudo apt-get install libcurl4-openssl-dev libjansson-dev
+```
+
 ## Installation
 
 The build system supports the following configuration parameters:
@@ -33,8 +47,24 @@ The build system supports the following configuration parameters:
 ### Backend Selection
 
 - `QKD_BACKEND`: Select QKD backend (simulated/cerberis_xgr). Default: simulated
-  - simulated: Available for ETSI 004
+  - simulated: Available for ETSI 004 and ETSI 014
   - cerberis_xgr: Available for ETSI 014
+
+### Cerberis XGR Configuration
+
+When using the cerberis_xgr backend, the following environment variables must be set:
+
+- `QKD_CERT_PATH`: Path to the public certificate
+- `QKD_KEY_PATH`: Path to the private key
+- `QKD_CA_CERT_PATH`: Path to the CA certificate
+
+Example:
+
+```bash
+export QKD_CERT_PATH=/path/to/cert.pem
+export QKD_KEY_PATH=/path/to/key.pem
+export QKD_CA_CERT_PATH=/path/to/ca.pem
+```
 
 ### Other Options
 
@@ -74,5 +104,28 @@ or
 ./etsi004_test
 
 # For ETSI 014
+./etsi014_test
+```
+
+### Testing ETSI014 with cerberis_xgr
+
+When testing the ETSI014 API with the `cerberis_xgr` backend, the following environment variables must be set:
+
+```bash
+# Certificate configuration
+export QKD_CERT_PATH=/path/to/cert.pem
+export QKD_KEY_PATH=/path/to/key.pem
+export QKD_CA_CERT_PATH=/path/to/ca.pem
+
+
+# Test configuration
+export QKD_KME_HOSTNAME="kme-hostname:port"
+export QKD_MASTER_SAE="master-sae-id"
+export QKD_SLAVE_SAE="slave-sae-id"
+```
+
+Then run the tests:
+
+```bash
 ./etsi014_test
 ```

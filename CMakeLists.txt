@@ -1,3 +1,10 @@
+# Copyright (C) 2024 QURSA Project
+# SPDX-License-Identifier: MIT
+#
+# Authors:
+# - Javier Blanco-Romero (@fj-blanco) - UC3M
+# - Pedro Otero-García (@pedrotega) - UVigo
+
 cmake_minimum_required(VERSION 3.10)
 
 project(qkd-etsi-api 
@@ -9,8 +16,6 @@ if(NOT CMAKE_BUILD_TYPE)
 endif()
 
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
-
-find_package(OpenSSL REQUIRED)
 
 option(QKD_DEBUG_LEVEL "Set debug verbosity (1-4)" 0)
 option(BUILD_TESTS "Build test programs" OFF)
@@ -26,6 +31,13 @@ set(COMMON_INCLUDES
 # QKD backend selection
 set(QKD_BACKEND "simulated" CACHE STRING "Select QKD backend (simulated, cerberis_xgr)")
 set_property(CACHE QKD_BACKEND PROPERTY STRINGS simulated cerberis_xgr)
+
+find_package(OpenSSL REQUIRED)
+if(ENABLE_ETSI014 AND QKD_BACKEND STREQUAL "cerberis_xgr")
+    find_package(CURL REQUIRED)
+    find_package(PkgConfig REQUIRED)
+    pkg_check_modules(JANSSON REQUIRED jansson)
+endif()
 
 if(QKD_BACKEND STREQUAL "simulated")
     add_compile_definitions(QKD_USE_SIMULATED)
@@ -71,29 +83,11 @@ if(ENABLE_ETSI014)
         list(APPEND API_SOURCES 
             src/etsi014/backends/cerberis_xgr.c
         )
-        add_compile_definitions(QKD_USE_CERBERIS_XGR)
-        
-        # Adding required libraries to interpret HTTPs req/res
-        set(ADDITIONAL_LIBRARIES curl jansson)
-
+        list(APPEND COMMON_INCLUDES
+            ${CURL_INCLUDE_DIRS}
+            ${JANSSON_INCLUDE_DIRS}
+        )
     endif()
-
-    add_library(qkd-etsi014-api ${ETSI014_SOURCES})
-    target_include_directories(qkd-etsi014-api
-        PUBLIC
-            ${COMMON_INCLUDES}
-    )
-    target_link_libraries(qkd-etsi014-api
-        PRIVATE
-            OpenSSL::Crypto
-            OpenSSL::SSL
-            ${ADDITIONAL_LIBRARIES}
-    )
-    target_compile_definitions(qkd-etsi014-api
-        PRIVATE
-            $<$<BOOL:${QKD_DEBUG_LEVEL}>:QKD_DEBUG_LEVEL=${QKD_DEBUG_LEVEL}>
-            ENABLE_ETSI014
-    )
 endif()
 
 # Create unified library
@@ -108,6 +102,8 @@ target_link_libraries(qkd-etsi-api
     PUBLIC
         OpenSSL::Crypto
         OpenSSL::SSL
+        $<$<AND:$<BOOL:${ENABLE_ETSI014}>,$<STREQUAL:${QKD_BACKEND},cerberis_xgr>>:${CURL_LIBRARIES}>
+        $<$<AND:$<BOOL:${ENABLE_ETSI014}>,$<STREQUAL:${QKD_BACKEND},cerberis_xgr>>:${JANSSON_LIBRARIES}>
 )
 
 target_compile_definitions(qkd-etsi-api

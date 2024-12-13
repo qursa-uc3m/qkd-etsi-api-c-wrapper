@@ -27,11 +27,42 @@
 #define MAX_KEYS 1024
 #define DEFAULT_KEY_SIZE 256
 
+static cerberis_cert_config_t cert_config;
+static int cert_config_initialized = 0;
+
 // Struct to store responses from cURL
 struct MemoryStruct {
     char *memory;
     size_t size;
 };
+
+/* Initialize certificate configuration from environment variables */
+static void init_cert_config(void) {
+    if (cert_config_initialized) {
+        return;
+    }
+
+    const char *cert_path = getenv("QKD_CERT_PATH");
+    const char *key_path = getenv("QKD_KEY_PATH");
+    const char *ca_cert_path = getenv("QKD_CA_CERT_PATH");
+
+    if (!cert_path || !key_path || !ca_cert_path) {
+        QKD_DBG_ERR("Required certificate environment variables not set");
+        QKD_DBG_ERR("Please set: QKD_CERT_PATH, QKD_KEY_PATH, QKD_CA_CERT_PATH");
+        exit(1);
+    }
+
+    cert_config.cert_path = cert_path;
+    cert_config.key_path = key_path;
+    cert_config.ca_cert_path = ca_cert_path;
+    
+    cert_config_initialized = 1;
+    
+    QKD_DBG_INFO("Certificate configuration initialized:");
+    QKD_DBG_INFO("  Cert path: %s", cert_config.cert_path);
+    QKD_DBG_INFO("  Key path: %s", cert_config.key_path);
+    QKD_DBG_INFO("  CA cert path: %s", cert_config.ca_cert_path);
+}
 
 /**************************************************************************************/
 /********************************* - HELPER FUNCTIONS - *******************************/
@@ -152,8 +183,10 @@ int parse_response_to_qkd_keys(const char *response, qkd_key_container_t *key_co
 }
 
 /* Handle to commit HTTPs requests */
-char *handle_request_https(const char *url, const char *cert, const char *key, 
-                        const char *ca_cert, const char *post_data, long *http_code) {
+static char *handle_request_https(const char *url, const char *post_data, long *http_code) {
+    if (!cert_config_initialized) {
+        init_cert_config();
+    }
     CURL *curl;
     CURLcode res;
     struct MemoryStruct chunk;
@@ -164,9 +197,9 @@ char *handle_request_https(const char *url, const char *cert, const char *key,
     curl = curl_easy_init();
     if(curl) {
         curl_easy_setopt(curl, CURLOPT_URL, url);
-        curl_easy_setopt(curl, CURLOPT_SSLCERT, cert);
-        curl_easy_setopt(curl, CURLOPT_SSLKEY, key);
-        curl_easy_setopt(curl, CURLOPT_CAINFO, ca_cert);
+        curl_easy_setopt(curl, CURLOPT_SSLCERT, cert_config.cert_path);    // Fixed
+        curl_easy_setopt(curl, CURLOPT_SSLKEY, cert_config.key_path);      // Fixed
+        curl_easy_setopt(curl, CURLOPT_CAINFO, cert_config.ca_cert_path);  // Fixed
         curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, WriteMemoryCallback);
         curl_easy_setopt(curl, CURLOPT_WRITEDATA, (void *)&chunk);
         
@@ -239,16 +272,16 @@ static char *build_post_data(qkd_key_ids_t *key_ids) {
 /**************************************************************************************/
 /****************************** - BACKEND IMPLEMENTATION - ****************************/
 /**************************************************************************************/
-static uint32_t get_status( const char *kme_hostname,
-                            const char *pub_key, const char *priv_key, const char *root_ca,
-                            const char *slave_sae_id, qkd_status_t *status) {
+static uint32_t get_status(const char *kme_hostname, 
+                              const char *slave_sae_id,
+                              qkd_status_t *status) {
     char url[256];
     char *response;
     long http_code;
 
     // Request to KME node
     snprintf(url, sizeof(url), "%s/api/v1/keys/%s/status", kme_hostname, slave_sae_id);
-    response = handle_request_https(url, pub_key, priv_key, root_ca, NULL, &http_code);
+    response = handle_request_https(url, NULL, &http_code);
 
     QKD_DBG_INFO("[GET_STATUS] - HTTP RSP Code: %ld", http_code);
     if (response && http_code < 400) {
@@ -277,10 +310,10 @@ static uint32_t get_status( const char *kme_hostname,
     }
 }
 
-static uint32_t get_key(const char *kme_hostname, 
-                        const char *pub_key, const char *priv_key, const char *root_ca,
-                        const char *slave_sae_id,
-                        qkd_key_request_t *request, qkd_key_container_t *container) {
+static uint32_t get_key(const char *kme_hostname,
+                           const char *slave_sae_id,
+                           qkd_key_request_t *request,
+                           qkd_key_container_t *container) {
     int num_keys = request ? request->number : 1;
     int size_keys = request ? request->size : DEFAULT_KEY_SIZE;
 
@@ -293,14 +326,15 @@ static uint32_t get_key(const char *kme_hostname,
 
     char *response;
     long http_code;
-    response = handle_request_https(url, pub_key, priv_key, root_ca, NULL, &http_code);
+    response = handle_request_https(url, NULL, &http_code);
 
     return handle_http_response(response, http_code, container);
 }
 
-static uint32_t get_key_with_ids(const char *kme_hostname, const char *master_sae_id,
-                                 const char *pub_key, const char *priv_key, const char *root_ca,
-                                 qkd_key_ids_t *key_ids, qkd_key_container_t *container) {
+static uint32_t get_key_with_ids(const char *kme_hostname,
+                                    const char *master_sae_id,
+                                    qkd_key_ids_t *key_ids,
+                                    qkd_key_container_t *container) {
     char url[256];
     snprintf(url, sizeof(url), "%s/api/v1/keys/%s/dec_keys", kme_hostname, master_sae_id);
 
@@ -308,7 +342,7 @@ static uint32_t get_key_with_ids(const char *kme_hostname, const char *master_sa
 
     char *response;
     long http_code;
-    response = handle_request_https(url, pub_key, priv_key, root_ca, post_data, &http_code);
+    response = handle_request_https(url, post_data, &http_code);
 
     free(post_data);
     return handle_http_response(response, http_code, container);

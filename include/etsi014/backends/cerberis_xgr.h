@@ -15,6 +15,12 @@
 #define QKD_ETSI_CERBERIS_XGR_H_
 
 #ifdef QKD_USE_CERBERIS_XGR
+typedef struct {
+    const char *cert_path;      // Path to public certificate
+    const char *key_path;       // Path to private key
+    const char *ca_cert_path;   // Path to CA certificate
+} cerberis_cert_config_t;
+
 extern const struct qkd_014_backend cerberis_xgr_backend;
 #endif
 

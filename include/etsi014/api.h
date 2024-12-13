@@ -79,19 +79,14 @@ struct qkd_014_backend {
     const char *name;
 
     uint32_t (*get_status)(const char *kme_hostname, const char *slave_sae_id,
-                           const char *pub_key, const char *priv_key, const char *root_ca,
                            qkd_status_t *status);
 
     uint32_t (*get_key)(const char *kme_hostname, const char *slave_sae_id,
-                        const char *pub_key, const char *priv_key, const char *root_ca,
                         qkd_key_request_t *request,
                         qkd_key_container_t *container);
 
     uint32_t (*get_key_with_ids)(const char *kme_hostname,
                                  const char *master_sae_id,
-                                 const char *pub_key, 
-                                 const char *priv_key, 
-                                 const char *root_ca,
                                  qkd_key_ids_t *key_ids,
                                  qkd_key_container_t *container);
 };
@@ -102,15 +97,12 @@ const struct qkd_014_backend *get_active_014_backend(void);
 
 /* ETSI GS QKD 014 API functions (section 5) */
 uint32_t GET_STATUS(const char *kme_hostname, const char *slave_sae_id,
-                    const char *pub_key, const char *priv_key, const char *root_ca,
                     qkd_status_t *status);
 
 uint32_t GET_KEY(const char *kme_hostname, const char *slave_sae_id,
-                 const char *pub_key, const char *priv_key, const char *root_ca,
                  qkd_key_request_t *request, qkd_key_container_t *container);
 
 uint32_t GET_KEY_WITH_IDS(const char *kme_hostname, const char *master_sae_id,
-                          const char *pub_key, const char *priv_key, const char *root_ca,
                           qkd_key_ids_t *key_ids,
                           qkd_key_container_t *container);
 
