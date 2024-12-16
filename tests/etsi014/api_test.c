@@ -85,7 +85,7 @@ static void test_get_status(void) {
 
 static void test_get_key(void) {
     qkd_key_request_t request = {
-        .number = 2, // Nodes have to be reconfigurated for multiple key retrivals
+        .number = 2, 
         .size = 256,
         .additional_slave_SAE_IDs = NULL,
         .additional_SAE_count = 0,
