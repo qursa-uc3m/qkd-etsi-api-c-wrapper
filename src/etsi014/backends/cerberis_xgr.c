@@ -327,7 +327,6 @@ static uint32_t get_key(const char *kme_hostname,
     char *response;
     long http_code;
     response = handle_request_https(url, NULL, &http_code);
-
     return handle_http_response(response, http_code, container);
 }
 

@@ -32,6 +32,9 @@ static const char *TEST_KME_HOSTNAME;
 static const char *TEST_MASTER_SAE;
 static const char *TEST_SLAVE_SAE;
 
+static const char *TEST_KEY_ID = "PREVIOUS_KEY_ID_OBTAINED";
+static const char *TEST_KEY = "PREVIOUS_KEY_OBTAINED";
+
 static void init_test_config(void) {
     TEST_KME_HOSTNAME = get_required_env("QKD_KME_HOSTNAME");
     TEST_MASTER_SAE = get_required_env("QKD_MASTER_SAE");
@@ -82,7 +85,7 @@ static void test_get_status(void) {
 
 static void test_get_key(void) {
     qkd_key_request_t request = {
-        .number = 1, // Nodes have to be reconfigurated for multiple key retrivals
+        .number = 2, // Nodes have to be reconfigurated for multiple key retrivals
         .size = 256,
         .additional_slave_SAE_IDs = NULL,
         .additional_SAE_count = 0,
@@ -108,9 +111,11 @@ static void test_get_key(void) {
     }
     printf("  Key format validation: PASS\n");
 
+    #ifndef QKD_USE_CERBERIS_XGR
     // Store first key ID for next test
     char *saved_key_id = strdup(container.keys[0].key_ID);
     char *saved_key = strdup(container.keys[0].key);
+    #endif
     
     // Cleanup container
     for (int i = 0; i < container.key_count; i++) {
@@ -120,23 +125,38 @@ static void test_get_key(void) {
     free(container.keys);
 
     // Test 3: Test key retrieval with ID
+    #ifndef QKD_USE_CERBERIS_XGR
     qkd_key_id_t key_id = {.key_ID = saved_key_id, .key_ID_extension = NULL};
+    #else
+    qkd_key_id_t key_id = {.key_ID = (char *)TEST_KEY_ID, .key_ID_extension = NULL};    
+    #endif // not QKD_USE_CERBERIS_XGR
     qkd_key_ids_t key_ids = {
         .key_IDs = &key_id, 
         .key_ID_count = 1, 
         .key_IDs_extension = NULL
     };
 
+    #ifndef QKD_USE_CERBERIS_XGR
     result = GET_KEY_WITH_IDS(TEST_KME_HOSTNAME, TEST_MASTER_SAE, &key_ids,
                                &container);
+    #else
+    result = GET_KEY_WITH_IDS(TEST_KME_HOSTNAME, TEST_SLAVE_SAE, &key_ids,
+                               &container);
+    #endif // not QKD_USE_CERBERIS_XGR
     assert(result == QKD_STATUS_OK);
     assert(container.key_count == 1);
+    #ifndef QKD_USE_CERBERIS_XGR
     assert(strcmp(saved_key,container.keys[0].key) == 0);
+    #else
+    assert(strcmp(TEST_KEY,container.keys[0].key) == 0);
+    #endif // not QKD_USE_CERBERIS_XGR
     printf("  Key retrieval by ID: PASS\n");
 
     // Cleanup
+    #ifndef QKD_USE_CERBERIS_XGR
     free(saved_key_id);
     free(saved_key);
+    #endif // not QKD_USE_CERBERIS_XGR
     for (int i = 0; i < container.key_count; i++) {
         free(container.keys[i].key_ID);
         free(container.keys[i].key);
