@@ -130,6 +130,7 @@ if(BUILD_TESTS)
     endif()
 
     if(ENABLE_ETSI014)
+        add_compile_definitions(USE_TEST)
         add_executable(etsi014_test
             tests/etsi014/api_test.c
         )

@@ -113,19 +113,37 @@ When testing the ETSI014 API with the `cerberis_xgr` backend, the following envi
 
 ```bash
 # Certificate configuration
-export QKD_CERT_PATH=/path/to/cert.pem
-export QKD_KEY_PATH=/path/to/key.pem
-export QKD_CA_CERT_PATH=/path/to/ca.pem
+export QKD_MASTER_CERT_PATH=/path/to/cert.crt
+export QKD_MASTER_KEY_PATH=/path/to/key.key
+export QKD_MASTER_CA_CERT_PATH=/path/to/ca.pem
 
+export QKD_SLAVE_CERT_PATH=/path/to/cert.crt
+export QKD_SLAVE_KEY_PATH=/path/to/key.key
+export QKD_SLAVE_CA_CERT_PATH=/path/to/ca.pem
 
 # Test configuration
-export QKD_KME_HOSTNAME="kme-hostname:port"
+export QKD_MASTER_KME_HOSTNAME="https://master-kme-hostname"
+export QKD_SLAVE_KME_HOSTNAME="https://slave-kme-hostname"
 export QKD_MASTER_SAE="master-sae-id"
 export QKD_SLAVE_SAE="slave-sae-id"
 ```
+
+The script `scripts/env_var.sh` can help to set the enviroment variables:
+```bash
+source ./scripts/env_var.sh
+```
+> 🛈 `source` command  ensures that the exported variables are available in your current session.
 
 Then run the tests:
 
 ```bash
 ./etsi014_test
 ```
+
+### Use alternative emulator for ETSI_014
+
+In case real nodes are not available for real tests, it can be used  emulators that implement the ETSI_014. For example, [QuKayDee](https://qukaydee.com/pages/about) is a QKD network simulator in the cloud. According to their page:
+
+> _"Its main goal is to allow users to test integration of their classical systems with the QKD network without needing physical QKD hardware. For example, network equipment vendors or service providers can test wether their encryptor devices are interoperable with the key delivery interface provided by QKD devices."_
+
+By following the tutorial on its web page it can be generated the necessary certificates to make the requests to the nodes in the cloud. To test them together with this project, the paths to the certificates simply have to be specified as environment variables as explained in the previous section.

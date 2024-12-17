@@ -42,13 +42,13 @@ static void init_cert_config(void) {
         return;
     }
 
-    const char *cert_path = getenv("QKD_CERT_PATH");
-    const char *key_path = getenv("QKD_KEY_PATH");
-    const char *ca_cert_path = getenv("QKD_CA_CERT_PATH");
+    const char *cert_path = getenv("QKD_MASTER_CERT_PATH");
+    const char *key_path = getenv("QKD_MASTER_KEY_PATH");
+    const char *ca_cert_path = getenv("QKD_MASTER_CA_CERT_PATH");
 
     if (!cert_path || !key_path || !ca_cert_path) {
         QKD_DBG_ERR("Required certificate environment variables not set");
-        QKD_DBG_ERR("Please set: QKD_CERT_PATH, QKD_KEY_PATH, QKD_CA_CERT_PATH");
+        QKD_DBG_ERR("Please set: QKD_MASTER_CERT_PATH, QKD_MASTER_KEY_PATH, QKD_MASTER_CA_CERT_PATH");
         exit(1);
     }
 
@@ -74,7 +74,7 @@ static size_t WriteMemoryCallback(void *contents, size_t size, size_t nmemb, voi
 
     char *ptr = realloc(mem->memory, mem->size + realsize + 1);
     if(ptr == NULL) {
-        printf("No hay suficiente memoria\n");
+        printf("There is not enough memory\n");
         return 0;
     }
 
@@ -184,6 +184,9 @@ int parse_response_to_qkd_keys(const char *response, qkd_key_container_t *key_co
 
 /* Handle to commit HTTPs requests */
 static char *handle_request_https(const char *url, const char *post_data, long *http_code) {
+    #ifdef USE_TEST
+    cert_config_initialized = 0;
+    #endif // USE_TEST
     if (!cert_config_initialized) {
         init_cert_config();
     }
@@ -282,7 +285,6 @@ static uint32_t get_status(const char *kme_hostname,
     // Request to KME node
     snprintf(url, sizeof(url), "%s/api/v1/keys/%s/status", kme_hostname, slave_sae_id);
     response = handle_request_https(url, NULL, &http_code);
-
     QKD_DBG_INFO("[GET_STATUS] - HTTP RSP Code: %ld", http_code);
     if (response && http_code < 400) {
         //puts(response); // Show JSON for debugging. 
@@ -346,7 +348,6 @@ static uint32_t get_key_with_ids(const char *kme_hostname,
     free(post_data);
     return handle_http_response(response, http_code, container);
 }
-
 
 /* Register backend */
 const struct qkd_014_backend cerberis_xgr_backend = {.name = "cerberis_xgr",
