@@ -123,13 +123,6 @@ static void test_get_key(void) {
     // Store first key ID for next test
     char *saved_key_id = strdup(container.keys[0].key_ID);
     char *saved_key = strdup(container.keys[0].key);
-    
-    // Cleanup container
-    // for (int i = 0; i < container.key_count; i++) {
-    //     free(container.keys[i].key_ID);
-    //     free(container.keys[i].key);
-    // }
-    // free(container.keys);
 
     // Test 3: Test key retrieval with ID
     qkd_key_id_t key_id = {.key_ID = saved_key_id, .key_ID_extension = NULL};
