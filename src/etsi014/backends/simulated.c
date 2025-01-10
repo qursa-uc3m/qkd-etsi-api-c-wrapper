@@ -72,20 +72,35 @@ static uint32_t sim_get_key(const char *kme_hostname,
                            const char *slave_sae_id,
                            qkd_key_request_t *request,
                            qkd_key_container_t *container) {
-    unsigned char key_bytes[KEY_SIZE];
-    if (!RAND_bytes(key_bytes, KEY_SIZE)) {
-        return QKD_STATUS_SERVER_ERROR;
-    }
+    // Fixed key ID matching QKD_KSID_SIZE (16 bytes)
+    static const unsigned char key_id[QKD_KSID_SIZE] = {
+        0xa1, 0xb2, 0xc3, 0xd4, 0xe5, 0xf6, 0x47, 0x58,
+        0x59, 0x6a, 0x7b, 0x8c, 0x9d, 0xae, 0xbf, 0xc0
+    };
+
+    // Fixed test key from ETSI 004
+    static const unsigned char test_key[KEY_SIZE] = {
+        0x8f, 0x40, 0xc5, 0xad, 0xb6, 0x8f, 0x25, 0x62, 0x4a, 0xe5, 0xb2,
+        0x14, 0xea, 0x76, 0x7a, 0x6e, 0xc9, 0x4d, 0x82, 0x9d, 0x3d, 0x7b,
+        0x5e, 0x1a, 0xd1, 0xba, 0x6f, 0x3e, 0x21, 0x38, 0x28, 0x5f
+    };
 
     container->key_count = 1;
     container->keys = calloc(1, sizeof(qkd_key_t));
+
+    container->keys[0].key = base64_encode(test_key, KEY_SIZE);
     
-    container->keys[0].key = base64_encode(key_bytes, KEY_SIZE);
-    container->keys[0].key_ID = strdup("sim-key-001");
-    
+    // Only return key ID if request is not NULL (initiator case)
+    if (request != NULL) {
+        char *hex_id = malloc(QKD_KSID_SIZE * 2 + 1); 
+        for(int i = 0; i < QKD_KSID_SIZE; i++) {
+            sprintf(hex_id + (i * 2), "%02x", key_id[i]);
+        }
+        container->keys[0].key_ID = hex_id;
+    }
+
     return QKD_STATUS_OK;
 }
-
 static uint32_t sim_get_key_with_ids(const char *kme_hostname,
                                     const char *master_sae_id,
                                     qkd_key_ids_t *key_ids,
