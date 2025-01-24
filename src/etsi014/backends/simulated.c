@@ -10,6 +10,7 @@
  * src/etsi014/backends/simulated.c
  */
 
+#include <unistd.h>
 #include <openssl/bio.h>
 #include <openssl/evp.h>
 #include <openssl/buffer.h>
@@ -23,6 +24,7 @@
 
 #define MAX_KEYS 16
 #define KEY_SIZE 32
+#define API_DELAY_MS 100
 
 static struct {
     char *key_data;      // Base64 encoded
@@ -61,6 +63,7 @@ static char* base64_encode(const unsigned char* input, int length) {
 static uint32_t sim_get_status(const char *kme_hostname, 
                               const char *slave_sae_id,
                               qkd_status_t *status) {
+    usleep(API_DELAY_MS * 1000);
     status->key_size = KEY_SIZE;
     status->stored_key_count = stored_keys;
     status->max_key_count = MAX_KEYS;
@@ -72,6 +75,7 @@ static uint32_t sim_get_key(const char *kme_hostname,
                            const char *slave_sae_id,
                            qkd_key_request_t *request,
                            qkd_key_container_t *container) {
+    usleep(API_DELAY_MS * 1000);
     // Fixed key ID matching QKD_KSID_SIZE (16 bytes)
     static const unsigned char key_id[QKD_KSID_SIZE] = {
         0xa1, 0xb2, 0xc3, 0xd4, 0xe5, 0xf6, 0x47, 0x58,
