@@ -8,7 +8,7 @@
  */
 
 /*
- * src/cerberis_xgr.c
+ * src/qkd_etsi014_backend.c
  */
 
 #include <openssl/evp.h>
@@ -20,9 +20,9 @@
 
 #include "debug.h"
 #include "etsi014/api.h"
-#include "etsi014/backends/cerberis_xgr.h"
+#include "etsi014/backends/qkd_etsi014_backend.h"
 
-#ifdef QKD_USE_CERBERIS_XGR
+#ifdef QKD_USE_ETSI014_BACKEND
 
 #define MAX_KEYS 1024
 #define DEFAULT_KEY_SIZE 256
@@ -350,9 +350,9 @@ static uint32_t get_key_with_ids(const char *kme_hostname,
 }
 
 /* Register backend */
-const struct qkd_014_backend cerberis_xgr_backend = {.name = "cerberis_xgr",
+const struct qkd_014_backend qkd_etsi014_backend = {.name = "qkd_etsi014_backend",
                                                   .get_status = get_status,
                                                   .get_key = get_key,
                                                   .get_key_with_ids = get_key_with_ids};
 
-#endif /* QKD_USE_CERBERIS_XGR */
+#endif /* QKD_USE_ETSI014_BACKEND */

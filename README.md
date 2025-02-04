@@ -27,7 +27,7 @@ This API implementation has been developed for integrating Quantum Key Distribut
 
 - OpenSSL development files (`libssl-dev` on Ubuntu/Debian)
 
-### Additional requirements for cerberis_xgr backend
+### Additional requirements for QKD ETSI 014 backends
 
 Ubuntu/Debian:
 
@@ -46,13 +46,14 @@ The build system supports the following configuration parameters:
 
 ### Backend Selection
 
-- `QKD_BACKEND`: Select QKD backend (simulated/cerberis_xgr). Default: simulated
+- `QKD_BACKEND`: Select QKD backend (simulated/cerberis_xgr/qukaydee). Default: simulated
   - simulated: Available for ETSI 004 and ETSI 014
   - cerberis_xgr: Available for ETSI 014
+  - qukaydee: Available for ETSI 014
 
 ### Cerberis XGR Configuration
 
-When using the cerberis_xgr backend, the following environment variables must be set:
+When using the QKD ETSI 014 backend, the following environment variables must be set:
 
 - `QKD_CERT_PATH`: Path to the public certificate
 - `QKD_KEY_PATH`: Path to the private key
@@ -129,9 +130,11 @@ export QKD_SLAVE_SAE="slave-sae-id"
 ```
 
 The script `scripts/env_var.sh` can help to set the enviroment variables:
+
 ```bash
 source ./scripts/env_var.sh
 ```
+
 > 🛈 `source` command  ensures that the exported variables are available in your current session.
 
 Then run the tests:
