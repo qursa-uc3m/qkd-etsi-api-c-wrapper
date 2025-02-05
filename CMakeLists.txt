@@ -114,32 +114,27 @@ target_compile_definitions(qkd-etsi-api
         $<$<STREQUAL:${QKD_BACKEND},simulated>:QKD_USE_SIMULATED>
 )
 
-# Tests
-if(BUILD_TESTS)
-    enable_testing()
+if(ENABLE_ETSI014)
+    add_compile_definitions(USE_TEST)
+    # Original test
+    add_executable(etsi014_test
+        tests/etsi014/api_test.c
+    )
+    target_link_libraries(etsi014_test
+        PRIVATE
+        qkd-etsi-api
+    )
+    add_test(NAME etsi014_test COMMAND etsi014_test)
 
-    if(ENABLE_ETSI004)
-        add_executable(etsi004_test
-            tests/etsi004/api_test.c
-        )
-        target_link_libraries(etsi004_test
-            PRIVATE
-                qkd-etsi-api
-        )
-        add_test(NAME etsi004_test COMMAND etsi004_test)
-    endif()
-
-    if(ENABLE_ETSI014)
-        add_compile_definitions(USE_TEST)
-        add_executable(etsi014_test
-            tests/etsi014/api_test.c
-        )
-        target_link_libraries(etsi014_test
-            PRIVATE
-                qkd-etsi-api
-        )
-        add_test(NAME etsi014_test COMMAND etsi014_test)
-    endif()
+    # New comprehensive test
+    add_executable(etsi014_full_test
+        tests/etsi014/api_full_test.c
+    )
+    target_link_libraries(etsi014_full_test
+        PRIVATE
+        qkd-etsi-api
+    )
+    add_test(NAME etsi014_full_test COMMAND etsi014_full_test)
 endif()
 
 # Installation
