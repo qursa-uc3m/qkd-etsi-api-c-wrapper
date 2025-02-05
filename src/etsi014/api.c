@@ -18,9 +18,9 @@
 #ifdef QKD_USE_SIMULATED
 #include "etsi014/backends/simulated.h"
 static const struct qkd_014_backend *active_backend = &simulated_backend;
-#elif defined(QKD_USE_CERBERIS_XGR)
-#include "etsi014/backends/cerberis_xgr.h"
-static const struct qkd_014_backend *active_backend = &cerberis_xgr_backend;
+#elif defined(QKD_USE_ETSI014_BACKEND)
+#include "etsi014/backends/qkd_etsi014_backend.h"
+static const struct qkd_014_backend *active_backend = &qkd_etsi014_backend;
 #else
 static const struct qkd_014_backend *active_backend = NULL;
 #endif

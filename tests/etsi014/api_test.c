@@ -18,7 +18,7 @@
 #include <string.h>
 
 /* Test configuration */
-#ifdef QKD_USE_CERBERIS_XGR
+#ifdef QKD_USE_ETSI014_BACKEND
 static const char *get_required_env(const char *name) {
     const char *value = getenv(name);
     if (value == NULL) {
@@ -64,7 +64,7 @@ static const char *TEST_SLAVE_SAE = "SAE_TEST_SLAVE";
 static void init_test_config(void) {
     // Nothing to initialize for simulated backend
 }
-#endif /* QKD_USE_CERBERIS_XGR */
+#endif /* QKD_USE_ETSI014_BACKEND */
 
 static void test_get_status(void) {
     qkd_status_t status = {0};
@@ -135,7 +135,7 @@ static void test_get_key(void) {
     // Test: Request a key that was already retrived
     result = GET_KEY_WITH_IDS(TEST_SKME_HOSTNAME, TEST_MASTER_SAE, &key_ids,
                                &container);
-    #ifndef QKD_USE_CERBERIS_XGR
+    #ifndef QKD_USE_ETSI014_BACKEND
     assert(result == QKD_STATUS_OK);
     assert(container.key_count == 1);
     #else
@@ -182,7 +182,7 @@ static void test_get_key(void) {
     assert(result == QKD_STATUS_OK);
     assert(container.key_count == 1);
     assert(strcmp(saved_key,container.keys[0].key) == 0);
-    #endif // not QKD_USE_CERBERIS_XGR
+    #endif // not QKD_USE_ETSI014_BACKEND
     
     printf("  Key retrieval by ID: PASS\n");
 

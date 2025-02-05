@@ -8,20 +8,20 @@
  */
 
 /*
- * include/etsi014/backends/cerberis_xgr.h
+ * include/etsi014/backends/qkd_etsi014_backend.h
  */
 
-#ifndef QKD_ETSI_CERBERIS_XGR_H_
-#define QKD_ETSI_CERBERIS_XGR_H_
+#ifndef QKD_ETSI_014_BACKEND_H_
+#define QKD_ETSI_014_BACKEND_H_
 
-#ifdef QKD_USE_CERBERIS_XGR
+#ifdef QKD_USE_ETSI014_BACKEND
 typedef struct {
     const char *cert_path;      // Path to public certificate
     const char *key_path;       // Path to private key
     const char *ca_cert_path;   // Path to CA certificate
-} cerberis_cert_config_t;
+} etsi014_cert_config_t;
 
-extern const struct qkd_014_backend cerberis_xgr_backend;
-#endif
+extern const struct qkd_014_backend qkd_etsi014_backend;
+#endif /* QKD_USE_ETSI014_BACKEND */
 
-#endif /* QKD_ETSI_CERBERIS_XGR_H_ */
+#endif /* QKD_ETSI_014_BACKEND_H_ */

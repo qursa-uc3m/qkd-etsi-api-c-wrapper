@@ -29,20 +29,28 @@ set(COMMON_INCLUDES
 )
 
 # QKD backend selection
-set(QKD_BACKEND "simulated" CACHE STRING "Select QKD backend (simulated, cerberis_xgr)")
-set_property(CACHE QKD_BACKEND PROPERTY STRINGS simulated cerberis_xgr)
+set(QKD_BACKEND "simulated" CACHE STRING "Select QKD backend (simulated, cerberis_xgr, qukaydee)")
+set_property(CACHE QKD_BACKEND PROPERTY STRINGS simulated cerberis_xgr qukaydee)
 
 find_package(OpenSSL REQUIRED)
-if(ENABLE_ETSI014 AND QKD_BACKEND STREQUAL "cerberis_xgr")
+if(ENABLE_ETSI014 AND (QKD_BACKEND STREQUAL "cerberis_xgr" OR QKD_BACKEND STREQUAL "qukaydee"))
     find_package(CURL REQUIRED)
     find_package(PkgConfig REQUIRED)
     pkg_check_modules(JANSSON REQUIRED jansson)
+    set(ENABLE_ETSI014_BACKEND TRUE)
+else()
+    set(ENABLE_ETSI014_BACKEND FALSE)
 endif()
 
 if(QKD_BACKEND STREQUAL "simulated")
     add_compile_definitions(QKD_USE_SIMULATED)
-elseif(QKD_BACKEND STREQUAL "cerberis_xgr")
-    add_compile_definitions(QKD_USE_CERBERIS_XGR)
+elseif(QKD_BACKEND STREQUAL "cerberis_xgr" OR QKD_BACKEND STREQUAL "qukaydee")
+    if(QKD_BACKEND STREQUAL "cerberis_xgr")
+        add_compile_definitions(QKD_USE_CERBERIS_XGR)
+    else()
+        add_compile_definitions(QKD_USE_QUKAYDEE)
+    endif()
+    add_compile_definitions(QKD_USE_ETSI014_BACKEND)
 endif()
 
 # Define sources based on enabled APIs
@@ -60,9 +68,9 @@ if(ENABLE_ETSI004)
         list(APPEND API_SOURCES 
             src/etsi004/backends/simulated.c
         )
-    elseif(QKD_BACKEND STREQUAL "cerberis_xgr")
+    elseif(QKD_BACKEND STREQUAL "cerberis_xgr" OR QKD_BACKEND STREQUAL "qukaydee")
         list(APPEND API_SOURCES 
-            src/etsi004/backends/cerberis_xgr.c
+            src/etsi004/backends/qkd_etsi014_backend.c
         )
     endif()
 endif()
@@ -79,9 +87,9 @@ if(ENABLE_ETSI014)
         list(APPEND API_SOURCES 
             src/etsi014/backends/simulated.c
         )
-    elseif(QKD_BACKEND STREQUAL "cerberis_xgr")
+        elseif(QKD_BACKEND STREQUAL "cerberis_xgr" OR QKD_BACKEND STREQUAL "qukaydee")
         list(APPEND API_SOURCES 
-            src/etsi014/backends/cerberis_xgr.c
+            src/etsi014/backends/qkd_etsi014_backend.c
         )
         list(APPEND COMMON_INCLUDES
             ${CURL_INCLUDE_DIRS}
@@ -102,8 +110,8 @@ target_link_libraries(qkd-etsi-api
     PUBLIC
         OpenSSL::Crypto
         OpenSSL::SSL
-        $<$<AND:$<BOOL:${ENABLE_ETSI014}>,$<STREQUAL:${QKD_BACKEND},cerberis_xgr>>:${CURL_LIBRARIES}>
-        $<$<AND:$<BOOL:${ENABLE_ETSI014}>,$<STREQUAL:${QKD_BACKEND},cerberis_xgr>>:${JANSSON_LIBRARIES}>
+        $<$<AND:$<BOOL:${ENABLE_ETSI014}>,$<BOOL:${ENABLE_ETSI014_BACKEND}>>:${CURL_LIBRARIES}>
+        $<$<AND:$<BOOL:${ENABLE_ETSI014}>,$<BOOL:${ENABLE_ETSI014_BACKEND}>>:${JANSSON_LIBRARIES}>
 )
 
 target_compile_definitions(qkd-etsi-api

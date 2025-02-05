@@ -8,7 +8,7 @@
  */
 
 /*
- * src/cerberis_xgr.c
+ * src/qkd_etsi014_backend.c
  */
 
 #include <openssl/evp.h>
@@ -20,15 +20,12 @@
 
 #include "debug.h"
 #include "etsi014/api.h"
-#include "etsi014/backends/cerberis_xgr.h"
+#include "etsi014/backends/qkd_etsi014_backend.h"
 
-#ifdef QKD_USE_CERBERIS_XGR
+#ifdef QKD_USE_ETSI014_BACKEND
 
 #define MAX_KEYS 1024
 #define DEFAULT_KEY_SIZE 256
-
-static cerberis_cert_config_t cert_config;
-static int cert_config_initialized = 0;
 
 // Struct to store responses from cURL
 struct MemoryStruct {
@@ -36,32 +33,47 @@ struct MemoryStruct {
     size_t size;
 };
 
-/* Initialize certificate configuration from environment variables */
-static void init_cert_config(void) {
-    if (cert_config_initialized) {
-        return;
+/* New certificate initialization function.
+ * role: 1 for initiator (master certs), 0 for responder (slave certs)
+ */
+int init_cert_config(int role, etsi014_cert_config_t *config) {
+    if (role == 1) {  // initiator: load master certificates
+        const char *cert_path = getenv("QKD_MASTER_CERT_PATH");
+        const char *key_path  = getenv("QKD_MASTER_KEY_PATH");
+        const char *ca_cert_path = getenv("QKD_MASTER_CA_CERT_PATH");
+
+        if (!cert_path || !key_path || !ca_cert_path) {
+            QKD_DBG_ERR("Required MASTER certificate environment variables not set");
+            return QKD_STATUS_BAD_REQUEST;
+        }
+        config->cert_path = cert_path;
+        config->key_path  = key_path;
+        config->ca_cert_path = ca_cert_path;
+
+        QKD_DBG_INFO("Master certificate configuration initialized:");
+        QKD_DBG_INFO("  Cert path: %s", config->cert_path);
+        QKD_DBG_INFO("  Key path: %s", config->key_path);
+        QKD_DBG_INFO("  CA cert path: %s", config->ca_cert_path);
+    } else {  // responder: load slave certificates
+        const char *cert_path = getenv("QKD_SLAVE_CERT_PATH");
+        const char *key_path  = getenv("QKD_SLAVE_KEY_PATH");
+        const char *ca_cert_path = getenv("QKD_SLAVE_CA_CERT_PATH");
+
+        if (!cert_path || !key_path || !ca_cert_path) {
+            QKD_DBG_ERR("Required SLAVE certificate environment variables not set");
+            return QKD_STATUS_BAD_REQUEST;
+        }
+        QKD_DBG_INFO("QKD_SLAVE_CERT_PATH: %s", cert_path);
+        QKD_DBG_INFO("QKD_SLAVE_KEY_PATH: %s", key_path);
+        QKD_DBG_INFO("QKD_SLAVE_CA_CERT_PATH: %s", ca_cert_path);
+
+        config->cert_path = cert_path;
+        config->key_path  = key_path;
+        config->ca_cert_path = ca_cert_path;
+
+        QKD_DBG_INFO("Slave certificate configuration initialized.");
     }
-
-    const char *cert_path = getenv("QKD_MASTER_CERT_PATH");
-    const char *key_path = getenv("QKD_MASTER_KEY_PATH");
-    const char *ca_cert_path = getenv("QKD_MASTER_CA_CERT_PATH");
-
-    if (!cert_path || !key_path || !ca_cert_path) {
-        QKD_DBG_ERR("Required certificate environment variables not set");
-        QKD_DBG_ERR("Please set: QKD_MASTER_CERT_PATH, QKD_MASTER_KEY_PATH, QKD_MASTER_CA_CERT_PATH");
-        exit(1);
-    }
-
-    cert_config.cert_path = cert_path;
-    cert_config.key_path = key_path;
-    cert_config.ca_cert_path = ca_cert_path;
-    
-    cert_config_initialized = 1;
-    
-    QKD_DBG_INFO("Certificate configuration initialized:");
-    QKD_DBG_INFO("  Cert path: %s", cert_config.cert_path);
-    QKD_DBG_INFO("  Key path: %s", cert_config.key_path);
-    QKD_DBG_INFO("  CA cert path: %s", cert_config.ca_cert_path);
+    return QKD_STATUS_OK;
 }
 
 /**************************************************************************************/
@@ -183,13 +195,7 @@ int parse_response_to_qkd_keys(const char *response, qkd_key_container_t *key_co
 }
 
 /* Handle to commit HTTPs requests */
-static char *handle_request_https(const char *url, const char *post_data, long *http_code) {
-    #ifdef USE_TEST
-    cert_config_initialized = 0;
-    #endif // USE_TEST
-    if (!cert_config_initialized) {
-        init_cert_config();
-    }
+static char *handle_request_https(const char *url, const char *post_data, long *http_code, etsi014_cert_config_t *cert_config) {
     CURL *curl;
     CURLcode res;
     struct MemoryStruct chunk;
@@ -282,6 +288,11 @@ static uint32_t get_status(const char *kme_hostname,
     char *response;
     long http_code;
 
+    etsi014_cert_config_t cert_config;
+
+    if (init_cert_config(1, &cert_config) != QKD_STATUS_OK)
+        return QKD_STATUS_BAD_REQUEST;
+
     // Request to KME node
     snprintf(url, sizeof(url), "%s/api/v1/keys/%s/status", kme_hostname, slave_sae_id);
     response = handle_request_https(url, NULL, &http_code);
@@ -328,6 +339,10 @@ static uint32_t get_key(const char *kme_hostname,
 
     char *response;
     long http_code;
+    etsi014_cert_config_t cert_config;
+    if (init_cert_config(1, &cert_config) != QKD_STATUS_OK)
+        return QKD_STATUS_BAD_REQUEST;
+
     response = handle_request_https(url, NULL, &http_code);
     return handle_http_response(response, http_code, container);
 }
@@ -343,16 +358,20 @@ static uint32_t get_key_with_ids(const char *kme_hostname,
 
     char *response;
     long http_code;
+    etsi014_cert_config_t cert_config;
+    if (init_cert_config(0, &cert_config) != QKD_STATUS_OK) {
+        free(post_data);
+        return QKD_STATUS_BAD_REQUEST;
+    }
     response = handle_request_https(url, post_data, &http_code);
-
     free(post_data);
     return handle_http_response(response, http_code, container);
 }
 
 /* Register backend */
-const struct qkd_014_backend cerberis_xgr_backend = {.name = "cerberis_xgr",
+const struct qkd_014_backend qkd_etsi014_backend = {.name = "qkd_etsi014_backend",
                                                   .get_status = get_status,
                                                   .get_key = get_key,
                                                   .get_key_with_ids = get_key_with_ids};
 
-#endif /* QKD_USE_CERBERIS_XGR */
+#endif /* QKD_USE_ETSI014_BACKEND */
