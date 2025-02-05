@@ -5,6 +5,7 @@
  * Authors:
  * - Javier Blanco-Romero (@fj-blanco) - UC3M
  * - Pedro Otero-García (@pedrotega) - UVigo
+ * - Daniel Sobral Blanco (@dasobral) - UC3M
  */
 
 /*
@@ -194,6 +195,109 @@ int parse_response_to_qkd_keys(const char *response, qkd_key_container_t *key_co
     return 0;
 }
 
+#ifdef QKD_USE_QUKAYDEE
+/**************************************************************************************/
+/***************** MODIFIED FUNCTIONS (only used with QKD_BACKEND="qukaydee") *********/
+/**************************************************************************************/
+
+/* Modified function to create a JSON with multiple keys for POST request.
+ * This version includes an extra "master_SAE_ID" field in each entry.
+ */
+static char *build_post_data(qkd_key_ids_t *key_ids, const char *master_sae_id) {
+    size_t buffer_size = 1024;
+    char *post_data = calloc(buffer_size, sizeof(char));
+    if (!post_data) {
+        return NULL;
+    }
+    strcat(post_data, "{\"key_IDs\":[");
+    for (int i = 0; i < key_ids->key_ID_count; ++i) {
+        char key_id_entry[256];
+        snprintf(key_id_entry, sizeof(key_id_entry),
+                 "{\"key_ID\":\"%s\",\"master_SAE_ID\":\"%s\"}",
+                 key_ids->key_IDs[i].key_ID, master_sae_id);
+        strcat(post_data, key_id_entry);
+        if (i < key_ids->key_ID_count - 1) {
+            strcat(post_data, ",");
+        }
+    }
+    strcat(post_data, "]}");
+    return post_data;
+}
+
+/* Modified HTTPS request handler that sets JSON HTTP headers */
+static char *handle_request_https(const char *url, const char *post_data, long *http_code,
+                                  etsi014_cert_config_t *cert_config) {
+    CURL *curl;
+    CURLcode res;
+    struct MemoryStruct chunk;
+
+    chunk.memory = malloc(1);
+    if (!chunk.memory) {
+        return NULL;
+    }
+    chunk.size = 0;
+
+    curl = curl_easy_init();
+    if(curl) {
+        curl_easy_setopt(curl, CURLOPT_URL, url);
+        curl_easy_setopt(curl, CURLOPT_SSLCERT, cert_config->cert_path);
+        curl_easy_setopt(curl, CURLOPT_SSLKEY, cert_config->key_path);
+        curl_easy_setopt(curl, CURLOPT_CAINFO, cert_config->ca_cert_path);
+        curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, WriteMemoryCallback);
+        curl_easy_setopt(curl, CURLOPT_WRITEDATA, (void *)&chunk);
+
+        /* Disable hostname verification (but still verify CA signatures) */
+        curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 0L);
+
+        /* Set HTTP headers for JSON */
+        struct curl_slist *headers = NULL;
+        headers = curl_slist_append(headers, "Accept: application/json");
+        headers = curl_slist_append(headers, "Content-Type: application/json");
+        curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
+
+        if (post_data != NULL) {
+            curl_easy_setopt(curl, CURLOPT_POSTFIELDS, post_data);
+        }
+
+        res = curl_easy_perform(curl);
+
+        if(res != CURLE_OK) {
+            fprintf(stderr, "Error in curl_easy_perform(): %s\n", curl_easy_strerror(res));
+            free(chunk.memory);
+            chunk.memory = NULL;
+        } else {
+            /* Retrieve the HTTP response code */
+            curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, http_code);
+        }
+        curl_slist_free_all(headers);
+        curl_easy_cleanup(curl);
+    }
+    return chunk.memory;
+}
+#else
+/**************************************************************************************/
+/*********************** ORIGINAL FUNCTIONS (for non-qukaydee) ************************/
+/**************************************************************************************/
+/* Original function to create a JSON with multiple keys for POST request */
+static char *build_post_data(qkd_key_ids_t *key_ids) {
+    size_t buffer_size = 1024;
+    char *post_data = calloc(buffer_size, sizeof(char));
+    if (!post_data) {
+        return NULL;
+    }
+    strcat(post_data, "{\"key_IDs\":[");
+    for (int i = 0; i < key_ids->key_ID_count; ++i) {
+        char key_id_entry[128];
+        snprintf(key_id_entry, sizeof(key_id_entry), "{\"key_ID\":\"%s\"}", key_ids->key_IDs[i].key_ID);
+        strcat(post_data, key_id_entry);
+        if (i < key_ids->key_ID_count - 1) {
+            strcat(post_data, ",");
+        }
+    }
+    strcat(post_data, "]}");
+    return post_data;
+}
+
 /* Handle to commit HTTPs requests */
 static char *handle_request_https(const char *url, const char *post_data, long *http_code, etsi014_cert_config_t *cert_config) {
     CURL *curl;
@@ -230,12 +334,12 @@ static char *handle_request_https(const char *url, const char *post_data, long *
             // Obtener el código de estado HTTP
             curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, http_code);
         }
-
         curl_easy_cleanup(curl);
     }
 
     return chunk.memory;
 }
+#endif /* QKD_USE_QUKAYDEE */
 
 /* Handle to manage HTTP responses with keys*/
 static uint32_t handle_http_response(const char *response, long http_code, 
@@ -259,24 +363,6 @@ static uint32_t handle_http_response(const char *response, long http_code,
     }
 }
 
-/* Function to create a JSON with multiple keys for POST request */
-static char *build_post_data(qkd_key_ids_t *key_ids) {
-    size_t buffer_size = 1024;
-    char *post_data = calloc(buffer_size, sizeof(char));
-    strcat(post_data, "{\"key_IDs\":[");
-
-    for (int i = 0; i < key_ids->key_ID_count; ++i) {
-        char key_id_entry[128];
-        snprintf(key_id_entry, sizeof(key_id_entry), "{\"key_ID\":\"%s\"}", key_ids->key_IDs[i].key_ID);
-        strcat(post_data, key_id_entry);
-        if (i < key_ids->key_ID_count - 1) {
-            strcat(post_data, ",");
-        }
-    }
-
-    strcat(post_data, "]}");
-    return post_data;
-}
 
 /**************************************************************************************/
 /****************************** - BACKEND IMPLEMENTATION - ****************************/
@@ -354,7 +440,12 @@ static uint32_t get_key_with_ids(const char *kme_hostname,
     char url[256];
     snprintf(url, sizeof(url), "%s/api/v1/keys/%s/dec_keys", kme_hostname, master_sae_id);
 
+#ifdef QKD_USE_QUKAYDEE
     char *post_data = build_post_data(key_ids, master_sae_id);
+#else
+    char *post_data = build_post_data(key_ids);
+#endif
+
     printf("DEBUG: POST DATA: %s\n", post_data);
 
     char *response;
