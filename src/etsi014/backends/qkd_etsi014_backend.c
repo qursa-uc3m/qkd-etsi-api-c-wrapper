@@ -206,9 +206,9 @@ static char *handle_request_https(const char *url, const char *post_data, long *
     curl = curl_easy_init();
     if(curl) {
         curl_easy_setopt(curl, CURLOPT_URL, url);
-        curl_easy_setopt(curl, CURLOPT_SSLCERT, cert_config.cert_path);    // Fixed
-        curl_easy_setopt(curl, CURLOPT_SSLKEY, cert_config.key_path);      // Fixed
-        curl_easy_setopt(curl, CURLOPT_CAINFO, cert_config.ca_cert_path);  // Fixed
+        curl_easy_setopt(curl, CURLOPT_SSLCERT, cert_config->cert_path);    // Fixed
+        curl_easy_setopt(curl, CURLOPT_SSLKEY, cert_config->key_path);      // Fixed
+        curl_easy_setopt(curl, CURLOPT_CAINFO, cert_config->ca_cert_path);  // Fixed
         curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, WriteMemoryCallback);
         curl_easy_setopt(curl, CURLOPT_WRITEDATA, (void *)&chunk);
         
@@ -295,7 +295,7 @@ static uint32_t get_status(const char *kme_hostname,
 
     // Request to KME node
     snprintf(url, sizeof(url), "%s/api/v1/keys/%s/status", kme_hostname, slave_sae_id);
-    response = handle_request_https(url, NULL, &http_code);
+    response = handle_request_https(url, NULL, &http_code, &cert_config);
     QKD_DBG_INFO("[GET_STATUS] - HTTP RSP Code: %ld", http_code);
     if (response && http_code < 400) {
         //puts(response); // Show JSON for debugging. 
@@ -343,7 +343,7 @@ static uint32_t get_key(const char *kme_hostname,
     if (init_cert_config(1, &cert_config) != QKD_STATUS_OK)
         return QKD_STATUS_BAD_REQUEST;
 
-    response = handle_request_https(url, NULL, &http_code);
+    response = handle_request_https(url, NULL, &http_code, &cert_config);
     return handle_http_response(response, http_code, container);
 }
 
@@ -354,7 +354,8 @@ static uint32_t get_key_with_ids(const char *kme_hostname,
     char url[256];
     snprintf(url, sizeof(url), "%s/api/v1/keys/%s/dec_keys", kme_hostname, master_sae_id);
 
-    char *post_data = build_post_data(key_ids);
+    char *post_data = build_post_data(key_ids, master_sae_id);
+    printf("DEBUG: POST DATA: %s\n", post_data);
 
     char *response;
     long http_code;
@@ -363,7 +364,8 @@ static uint32_t get_key_with_ids(const char *kme_hostname,
         free(post_data);
         return QKD_STATUS_BAD_REQUEST;
     }
-    response = handle_request_https(url, post_data, &http_code);
+    printf("DEBUG: Request URI: %s\n", url);
+    response = handle_request_https(url, post_data, &http_code, &cert_config);
     free(post_data);
     return handle_http_response(response, http_code, container);
 }

@@ -21,6 +21,8 @@ typedef struct {
     const char *ca_cert_path;   // Path to CA certificate
 } etsi014_cert_config_t;
 
+int init_cert_config(int role, etsi014_cert_config_t *config);
+
 extern const struct qkd_014_backend qkd_etsi014_backend;
 #endif /* QKD_USE_ETSI014_BACKEND */
 
