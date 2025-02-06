@@ -87,7 +87,7 @@ static size_t WriteMemoryCallback(void *contents, size_t size, size_t nmemb, voi
 
     char *ptr = realloc(mem->memory, mem->size + realsize + 1);
     if(ptr == NULL) {
-        printf("There is not enough memory\n");
+        QKD_DBG_ERR("There is not enough memory");
         return 0;
     }
 
@@ -107,7 +107,7 @@ int parse_response_to_qkd_status(const char *response, qkd_status_t *status) {
     // Load JSON from string
     root = json_loads(response, 0, &error);
     if (!root) {
-        fprintf(stderr, "Error parsing JSON: %s\n", error.text);
+        QKD_DBG_ERR("Error parsing JSON: %s", error.text);
         return -1;
     }
 
@@ -144,14 +144,14 @@ int parse_response_to_qkd_keys(const char *response, qkd_key_container_t *key_co
     // Load JSON from string
     root = json_loads(response, 0, &error);
     if (!root) {
-        fprintf(stderr, "Error parsing JSON: %s\n", error.text);
+        QKD_DBG_ERR("Error parsing JSON: %s", error.text);
         return -1;
     }
 
     // Obtain array with the keys
     json_t *keys = json_object_get(root, "keys");
     if (!json_is_array(keys)) {
-        fprintf(stderr, "Error: 'keys' is not a valid JSON array\n");
+        QKD_DBG_ERR("Error: 'keys' is not a valid JSON array");
         json_decref(root);
         return -1;
     }
@@ -162,7 +162,7 @@ int parse_response_to_qkd_keys(const char *response, qkd_key_container_t *key_co
     key_container->keys = malloc(key_count * sizeof(qkd_key_t));
 
     if (!key_container->keys) {
-        fprintf(stderr, "Error allocating memory for keys\n");
+        QKD_DBG_ERR("Error allocating memory for keys");
         json_decref(root);
         return -1;
     }
@@ -171,7 +171,7 @@ int parse_response_to_qkd_keys(const char *response, qkd_key_container_t *key_co
     for (size_t i = 0; i < key_count; i++) {
         json_t *key_data = json_array_get(keys, i);
         if (!json_is_object(key_data)) {
-            fprintf(stderr, "Error: Invalid key object at index %zu\n", i);
+            QKD_DBG_ERR("Error: Invalid key object at index %zu", i);
             continue;
         }
 
@@ -180,7 +180,7 @@ int parse_response_to_qkd_keys(const char *response, qkd_key_container_t *key_co
         json_t *key = json_object_get(key_data, "key");
 
         if (!json_is_string(key_id) || !json_is_string(key)) {
-            fprintf(stderr, "Error: Invalid key or key_ID at index %zu\n", i);
+            QKD_DBG_ERR("Error: Invalid key or key_ID at index %zu", i);
             continue;
         }
 
@@ -262,7 +262,7 @@ static char *handle_request_https(const char *url, const char *post_data, long *
         res = curl_easy_perform(curl);
 
         if(res != CURLE_OK) {
-            fprintf(stderr, "Error in curl_easy_perform(): %s\n", curl_easy_strerror(res));
+            QKD_DBG_ERR("Error in curl_easy_perform(): %s", curl_easy_strerror(res));
             free(chunk.memory);
             chunk.memory = NULL;
         } else {
@@ -327,7 +327,7 @@ static char *handle_request_https(const char *url, const char *post_data, long *
         res = curl_easy_perform(curl);
 
         if(res != CURLE_OK) {
-            fprintf(stderr, "Error en curl_easy_perform(): %s\n", curl_easy_strerror(res));
+            QKD_DBG_ERR("Error in curl_easy_perform(): %s", curl_easy_strerror(res));
             free(chunk.memory);
             chunk.memory = NULL;
         } else {
@@ -446,7 +446,7 @@ static uint32_t get_key_with_ids(const char *kme_hostname,
     char *post_data = build_post_data(key_ids);
 #endif
 
-    printf("DEBUG: POST DATA: %s\n", post_data);
+    QKD_DBG_VERB("POST DATA: %s", post_data);
 
     char *response;
     long http_code;
@@ -455,7 +455,9 @@ static uint32_t get_key_with_ids(const char *kme_hostname,
         free(post_data);
         return QKD_STATUS_BAD_REQUEST;
     }
-    printf("DEBUG: Request URI: %s\n", url);
+
+    QKD_DBG_VERB("Request URI: %s", url);
+
     response = handle_request_https(url, post_data, &http_code, &cert_config);
     free(post_data);
     return handle_http_response(response, http_code, container);

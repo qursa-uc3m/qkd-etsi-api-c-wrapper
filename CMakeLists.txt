@@ -53,6 +53,30 @@ elseif(QKD_BACKEND STREQUAL "cerberis_xgr" OR QKD_BACKEND STREQUAL "qukaydee")
     add_compile_definitions(QKD_USE_ETSI014_BACKEND)
 endif()
 
+# Configure and generate qkd_config.h
+if(QKD_BACKEND STREQUAL "simulated")
+    set(QKD_USE_SIMULATED 1)
+    set(QKD_USE_CERBERIS_XGR 0)
+    set(QKD_USE_QUKAYDEE 0)
+elseif(QKD_BACKEND STREQUAL "cerberis_xgr")
+    set(QKD_USE_SIMULATED 0)
+    set(QKD_USE_CERBERIS_XGR 1)
+    set(QKD_USE_QUKAYDEE 0)
+else()
+    set(QKD_USE_SIMULATED 0)
+    set(QKD_USE_CERBERIS_XGR 0)
+    set(QKD_USE_QUKAYDEE 1)
+endif()
+
+configure_file(
+    ${CMAKE_CURRENT_SOURCE_DIR}/include/qkd_config.h.in
+    ${CMAKE_CURRENT_BINARY_DIR}/qkd_config.h
+    @ONLY
+)
+
+# Add binary dir to includes for qkd_config.h
+list(APPEND COMMON_INCLUDES ${CMAKE_CURRENT_BINARY_DIR})
+
 # Define sources based on enabled APIs
 set(API_SOURCES "")
 
@@ -155,6 +179,11 @@ install(TARGETS qkd-etsi-api
 install(FILES
     include/debug.h
     include/qkd_etsi_api.h
+    DESTINATION include/qkd-etsi-api
+)
+
+install(FILES
+    ${CMAKE_CURRENT_BINARY_DIR}/qkd_config.h
     DESTINATION include/qkd-etsi-api
 )
 

@@ -14,6 +14,8 @@
 #ifndef QKD_ETSI_014_BACKEND_H_
 #define QKD_ETSI_014_BACKEND_H_
 
+#include "qkd_etsi_api.h"
+
 #ifdef QKD_USE_ETSI014_BACKEND
 typedef struct {
     const char *cert_path;      // Path to public certificate

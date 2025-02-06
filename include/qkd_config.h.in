@@ -1,0 +1,16 @@
+#ifndef QKD_CONFIG_H
+#define QKD_CONFIG_H
+
+#cmakedefine01 QKD_USE_QUKAYDEE
+#cmakedefine01 QKD_USE_CERBERIS_XGR
+#cmakedefine01 QKD_USE_SIMULATED
+
+#if QKD_USE_QUKAYDEE
+#define QKD_BACKEND_TYPE "qukaydee"
+#elif QKD_USE_CERBERIS_XGR
+#define QKD_BACKEND_TYPE "cerberis_xgr"
+#elif QKD_USE_SIMULATED
+#define QKD_BACKEND_TYPE "simulated"
+#endif
+
+#endif /* QKD_CONFIG_H */
