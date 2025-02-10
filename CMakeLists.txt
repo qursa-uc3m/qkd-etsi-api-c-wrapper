@@ -146,7 +146,7 @@ target_compile_definitions(qkd-etsi-api
         $<$<STREQUAL:${QKD_BACKEND},simulated>:QKD_USE_SIMULATED>
 )
 
-if(ENABLE_ETSI014)
+if(BUILD_TESTS)
     add_compile_definitions(USE_TEST)
     # Original test
     add_executable(etsi014_test

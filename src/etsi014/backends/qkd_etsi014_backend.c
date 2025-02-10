@@ -21,6 +21,7 @@
 
 #include "debug.h"
 #include "etsi014/api.h"
+#include "qkd_config.h"
 #include "etsi014/backends/qkd_etsi014_backend.h"
 
 #ifdef QKD_USE_ETSI014_BACKEND
@@ -414,7 +415,8 @@ static uint32_t get_key(const char *kme_hostname,
                            qkd_key_request_t *request,
                            qkd_key_container_t *container) {
     int num_keys = request ? request->number : 1;
-    int size_keys = request ? request->size : DEFAULT_KEY_SIZE;
+    //int size_keys = request ? request->size : DEFAULT_KEY_SIZE;
+    int size_keys=DEFAULT_KEY_SIZE;
 
     container->keys = calloc(num_keys, sizeof(qkd_key_t));
     container->key_count = num_keys;

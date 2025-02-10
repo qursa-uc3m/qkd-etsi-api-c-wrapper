@@ -12,7 +12,7 @@
 #include <stddef.h>     // for size_t, NULL
 #include <stdint.h>     // for uint32_t
 #include "etsi014/api.h"
-#include "etsi014/backends/qkd_etsi014_backend.h"
+#include "qkd_etsi014_backend.h"
 
 /* Global configuration variables */
 static const char *MKME_HOSTNAME;

@@ -14,6 +14,8 @@
 #ifndef QKD_ETSI_API_H
 #define QKD_ETSI_API_H
 
+#include "qkd_config.h"
+
 #if defined(QKD_DEBUG_LEVEL) && (QKD_DEBUG_LEVEL > 0)
 #ifdef QKD_USE_QUKAYDEE
 #pragma message "QKD_USE_QUKAYDEE is defined"
@@ -23,7 +25,7 @@
 #endif /* QKD_DEBUG_LEVEL */
 
 #ifdef QKD_USE_QUKAYDEE
-#define QKD_KEY_SIZE 256     /* Size of key buffer in bytes */ /* TODO: Check if this is always as in QuKayDee simulator (expect size in bites)*/
+#define QKD_KEY_SIZE 32     /* Size of key buffer in bytes */ /* TODO: Check if this is always as in QuKayDee simulator (expect size in bites)*/
 #else
 #define QKD_KEY_SIZE 32      /* Size of key buffer in bytes */
 #endif /* QKD_USE_QUKAYDEE */
