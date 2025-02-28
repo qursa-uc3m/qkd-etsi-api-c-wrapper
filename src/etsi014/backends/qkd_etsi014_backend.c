@@ -300,26 +300,36 @@ static char *build_post_data(qkd_key_ids_t *key_ids) {
 }
 
 /* Handle to commit HTTPs requests */
-static char *handle_request_https(const char *url, const char *post_data, long *http_code, etsi014_cert_config_t *cert_config) {
+static char *handle_request_https(const char *url, const char *post_data, long *http_code,
+                                  etsi014_cert_config_t *cert_config) {
     CURL *curl;
     CURLcode res;
     struct MemoryStruct chunk;
 
-    chunk.memory = malloc(1); 
-    chunk.size = 0;    
+    chunk.memory = malloc(1);
+    if (!chunk.memory) {
+        return NULL;
+    }
+    chunk.size = 0;
 
     curl = curl_easy_init();
     if(curl) {
         curl_easy_setopt(curl, CURLOPT_URL, url);
-        curl_easy_setopt(curl, CURLOPT_SSLCERT, cert_config->cert_path);    // Fixed
-        curl_easy_setopt(curl, CURLOPT_SSLKEY, cert_config->key_path);      // Fixed
-        curl_easy_setopt(curl, CURLOPT_CAINFO, cert_config->ca_cert_path);  // Fixed
+        curl_easy_setopt(curl, CURLOPT_HTTP_VERSION, CURL_HTTP_VERSION_1_1);  // Force HTTP/1.1
+        curl_easy_setopt(curl, CURLOPT_SSLCERT, cert_config->cert_path);
+        curl_easy_setopt(curl, CURLOPT_SSLKEY, cert_config->key_path);
+        curl_easy_setopt(curl, CURLOPT_CAINFO, cert_config->ca_cert_path);
         curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, WriteMemoryCallback);
         curl_easy_setopt(curl, CURLOPT_WRITEDATA, (void *)&chunk);
-        
-        // No comprueba los nombres en los certificados pero se sigue comprobando que los
-        // certificados esten firmados por una CA de confianza.
+
+        /* Disable hostname verification (but still verify CA signatures) */
         curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 0L);
+
+        /* Set HTTP headers for JSON */
+        struct curl_slist *headers = NULL;
+        headers = curl_slist_append(headers, "Accept: application/json");
+        headers = curl_slist_append(headers, "Content-Type: application/json");
+        curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
 
         if (post_data != NULL) {
             curl_easy_setopt(curl, CURLOPT_POSTFIELDS, post_data);
@@ -332,12 +342,12 @@ static char *handle_request_https(const char *url, const char *post_data, long *
             free(chunk.memory);
             chunk.memory = NULL;
         } else {
-            // Obtener el código de estado HTTP
+            /* Retrieve the HTTP response code */
             curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, http_code);
         }
+        curl_slist_free_all(headers);
         curl_easy_cleanup(curl);
     }
-
     return chunk.memory;
 }
 #endif /* QKD_USE_QUKAYDEE */
