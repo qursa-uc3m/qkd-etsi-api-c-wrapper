@@ -166,6 +166,17 @@ target_link_libraries(qkd-etsi-api
         $<$<AND:$<BOOL:${ENABLE_ETSI014}>,$<BOOL:${ENABLE_ETSI014_BACKEND}>>:${JANSSON_LIBRARIES}>
 )
 
+if(WIN32)
+  # On Windows, adjust if needed.
+else()
+  find_library(UUID_LIB uuid)
+  if(UUID_LIB)
+    target_link_libraries(qkd-etsi-api PUBLIC ${UUID_LIB})
+  else()
+    message(FATAL_ERROR "UUID library not found!")
+  endif()
+endif()
+
 target_compile_definitions(qkd-etsi-api
     PRIVATE
         $<$<BOOL:${QKD_DEBUG_LEVEL}>:QKD_DEBUG_LEVEL=${QKD_DEBUG_LEVEL}>

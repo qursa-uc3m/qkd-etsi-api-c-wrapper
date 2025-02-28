@@ -16,16 +16,6 @@
 
 #include "qkd_config.h"
 
-#if defined(QKD_DEBUG_LEVEL) && (QKD_DEBUG_LEVEL > 0)
-#if QKD_USE_QUKAYDEE
-#pragma message "QKD_USE_QUKAYDEE is defined: using QuKayDee backend"
-#elif QKD_USE_CERBERIS_XGR
-#pragma message "QKD_USE_CERBERIS_XGR is defined: Using Cerberis XGR backend"
-#else 
-#pragma message "QKD_USE_SIMULATED is defined: Using simulated backend"
-#endif 
-#endif /* QKD_DEBUG_LEVEL */
-
 #if QKD_USE_QUKAYDEE
 #define QKD_KEY_SIZE 32     /* Size of key buffer in bytes */ /* TODO: Check if this is always as in QuKayDee simulator (expect size in bites)*/
 #else
