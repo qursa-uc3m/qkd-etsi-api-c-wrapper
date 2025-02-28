@@ -143,6 +143,12 @@ Then run the tests:
 ./etsi014_test
 ```
 
+For ETSI 014 full test (only available with hardware backends)
+
+```bash
+./etsi014_full_test
+```
+
 ### Use alternative emulator for ETSI_014
 
 In case real nodes are not available for real tests, it can be used  emulators that implement the ETSI_014. For example, [QuKayDee](https://qukaydee.com/pages/about) is a QKD network simulator in the cloud. According to their page:

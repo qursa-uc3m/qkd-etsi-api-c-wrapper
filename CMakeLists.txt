@@ -185,16 +185,17 @@ if(BUILD_TESTS)
         qkd-etsi-api
     )
     add_test(NAME etsi014_test COMMAND etsi014_test)
-
-    # New comprehensive test
-    add_executable(etsi014_full_test
-        tests/etsi014/api_full_test.c
-    )
-    target_link_libraries(etsi014_full_test
-        PRIVATE
-        qkd-etsi-api
-    )
-    add_test(NAME etsi014_full_test COMMAND etsi014_full_test)
+    if(NOT QKD_BACKEND STREQUAL "simulated")
+        # New comprehensive test
+        add_executable(etsi014_full_test
+            tests/etsi014/api_full_test.c
+        )
+        target_link_libraries(etsi014_full_test
+            PRIVATE
+            qkd-etsi-api
+        )
+        add_test(NAME etsi014_full_test COMMAND etsi014_full_test)
+    endif()
 endif()
 
 # Installation
