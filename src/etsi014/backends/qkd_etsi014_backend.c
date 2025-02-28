@@ -451,9 +451,12 @@ static uint32_t get_key(const char *kme_hostname,
     char *response;
     long http_code;
     etsi014_cert_config_t cert_config;
+    /*
     if (init_cert_config(1, &cert_config) != QKD_STATUS_OK)
         return QKD_STATUS_BAD_REQUEST;
-    return QKD_STATUS_OK
+    */
+    return QKD_STATUS_OK;
+
     //response = handle_request_https(url, NULL, &http_code, &cert_config);
     //return handle_http_response(response, http_code, container);
 }
