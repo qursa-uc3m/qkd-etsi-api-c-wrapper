@@ -424,8 +424,21 @@ static uint32_t get_key(const char *kme_hostname,
                            const char *slave_sae_id,
                            qkd_key_request_t *request,
                            qkd_key_container_t *container) {
+
+    if (!kme_hostname) {
+        QKD_DBG_ERR("get_key: kme_hostname is NULL");
+        return QKD_STATUS_BAD_REQUEST;
+    }
+    if (!slave_sae_id) {
+        QKD_DBG_ERR("get_key: slave_sae_id is NULL");
+        return QKD_STATUS_BAD_REQUEST;
+    }
+    if (!container) {
+        QKD_DBG_ERR("get_key: container pointer is NULL");
+        return QKD_STATUS_BAD_REQUEST;
+    }
+                            
     int num_keys = request ? request->number : 1;
-    //int size_keys = request ? request->size : DEFAULT_KEY_SIZE;
     int size_keys=DEFAULT_KEY_SIZE;
 
     container->keys = calloc(num_keys, sizeof(qkd_key_t));
