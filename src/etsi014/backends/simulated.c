@@ -7,194 +7,217 @@
  */
 
 /*
- * src/etsi014/backends/simulated.c
+ * src/etsi004/backends/simulated.c
  */
 
- #include <stdio.h>
- #include <stdlib.h>
- #include <string.h>
- #include <unistd.h>
- #include <openssl/bio.h>
- #include <openssl/buffer.h>
  #include <openssl/evp.h>
- #include <uuid/uuid.h>
- #include "etsi014/api.h"
- #include "etsi014/backends/simulated.h"
+ #include <string.h>
+ #include <time.h>
+ 
  #include "debug.h"
+ #include "etsi004/api.h"
+ #include "etsi004/backends/simulated.h"
  
  #ifdef QKD_USE_SIMULATED
  
- #define MAX_KEYS 16
- #define KEY_SIZE 32
- #define API_DELAY_MS 100
+ #define MAX_STREAMS 16
+ #define MAX_KEYS_PER_STREAM 1024
+ #define QKD_KEY_SIZE 32  /* 256-bit keys */
  
- static struct {
-     char *key_data;      // Base64 encoded
-     char *key_id;        // UUID format
- } key_store[MAX_KEYS];
+ /* Test key and ID structures */
+ static const unsigned char test_key_uuid[QKD_KSID_SIZE] = {
+     0xa1, 0xb2, 0xc3, 0xd4, 0xe5, 0xf6, 0x47, 0x58,
+     0x59, 0x6a, 0x7b, 0x8c, 0x9d, 0xae, 0xbf, 0xc0};
  
- static size_t stored_keys = 0;
+ static const unsigned char test_key[QKD_KEY_SIZE] = {
+     0x8f, 0x40, 0xc5, 0xad, 0xb6, 0x8f, 0x25, 0x62, 0x4a, 0xe5, 0xb2,
+     0x14, 0xea, 0x76, 0x7a, 0x6e, 0xc9, 0x4d, 0x82, 0x9d, 0x3d, 0x7b,
+     0x5e, 0x1a, 0xd1, 0xba, 0x6f, 0x3e, 0x21, 0x38, 0x28, 0x5f};
  
- static char* base64_encode(const unsigned char* input, int length) {
-     BIO *bmem, *b64;
-     BUF_MEM *bptr;
-     
-     b64 = BIO_new(BIO_f_base64());
-     bmem = BIO_new(BIO_s_mem());
-     b64 = BIO_push(b64, bmem);
-     
-     BIO_set_flags(b64, BIO_FLAGS_BASE64_NO_NL);
-     BIO_write(b64, input, length);
-     BIO_flush(b64);
-     
-     BIO_get_mem_ptr(b64, &bptr);
-     
-     char *buff = malloc(bptr->length + 1);
-     if (!buff) {
-         BIO_free_all(b64);
-         return NULL;
+ struct key_block {
+     unsigned char key[QKD_KEY_SIZE];
+     uint32_t index;
+     uint64_t timestamp;
+     bool used;
+ };
+ 
+ struct stream_state {
+     unsigned char key_id[QKD_KSID_SIZE];
+     struct qkd_qos_s qos;
+     bool in_use;
+     bool is_initiator;
+     uint32_t last_index;
+     uint64_t creation_time;
+     bool pending_close;
+     struct key_block keys[MAX_KEYS_PER_STREAM];
+     uint32_t num_keys;
+ };
+ 
+ static struct stream_state streams[MAX_STREAMS];
+ 
+ /* Find stream by ID, returns -1 if not found */
+ static int find_stream(const unsigned char *key_id) {
+     if (!key_id)
+         return -1;
+ 
+     for (int i = 0; i < MAX_STREAMS; i++) {
+         if (streams[i].in_use &&
+             memcmp(streams[i].key_id, key_id, QKD_KSID_SIZE) == 0) {
+             return i;
+         }
      }
-     
-     memcpy(buff, bptr->data, bptr->length);
-     buff[bptr->length] = 0;
-     
-     BIO_free_all(b64);
-     return buff;
+     return -1;
  }
  
- // Generate a valid UUID string
- static char* generate_uuid_string() {
-     uuid_t uuid;
-     char *uuid_str = malloc(37); // 36 chars + null terminator
-     
-     if (!uuid_str) {
-         return NULL;
+ /* Allocate new stream slot */
+ static int allocate_stream(void) {
+     for (int i = 0; i < MAX_STREAMS; i++) {
+         if (!streams[i].in_use) {
+             return i;
+         }
      }
-     
-     uuid_generate(uuid);
-     uuid_unparse(uuid, uuid_str);
-     
-     return uuid_str;
+     return -1;
  }
  
- static uint32_t sim_get_status(const char *kme_hostname,
-                                const char *slave_sae_id,
-                                qkd_status_t *status) {
-     usleep(API_DELAY_MS * 1000);
-     if (!kme_hostname || !slave_sae_id) {
-         QKD_DBG_ERR("sim_get_status: NULL hostname or slave SAE ID");
-         return QKD_STATUS_BAD_REQUEST;
-     }
-     status->key_size = KEY_SIZE;
-     status->stored_key_count = stored_keys;
-     status->max_key_count = MAX_KEYS;
-     status->max_key_per_request = 1;
-     
-     // Optional: Set source KME ID if needed
-     status->source_KME_ID = strdup(kme_hostname);
-     
-     return QKD_STATUS_OK;
+ /* Get current time in milliseconds */
+ static uint64_t get_current_time_ms(void) {
+     struct timespec ts;
+     clock_gettime(CLOCK_MONOTONIC, &ts);
+     return (uint64_t)ts.tv_sec * 1000 + (uint64_t)ts.tv_nsec / 1000000;
  }
  
- static uint32_t sim_get_key(const char *kme_hostname,
-                            const char *slave_sae_id,
-                            qkd_key_request_t *request,
-                            qkd_key_container_t *container) {
-     usleep(API_DELAY_MS * 1000);
-     
-     // Fixed test key from ETSI 004
-     static const unsigned char test_key[KEY_SIZE] = {
-         0x8f, 0x40, 0xc5, 0xad, 0xb6, 0x8f, 0x25, 0x62, 0x4a, 0xe5, 0xb2,
-         0x14, 0xea, 0x76, 0x7a, 0x6e, 0xc9, 0x4d, 0x82, 0x9d, 0x3d, 0x7b,
-         0x5e, 0x1a, 0xd1, 0xba, 0x6f, 0x3e, 0x21, 0x38, 0x28, 0x5f
-     };
-     
-     container->key_count = 1;
-     container->keys = calloc(1, sizeof(qkd_key_t));
-     if (!container->keys) {
-         return QKD_STATUS_BAD_REQUEST;
-     }
-     
-     container->keys[0].key = base64_encode(test_key, KEY_SIZE);
-     if (!container->keys[0].key) {
-         free(container->keys);
-         container->keys = NULL;
-         return QKD_STATUS_BAD_REQUEST;
-     }
-     
-     // Only return key ID if request is not NULL (initiator case)
-     container->keys[0].key_ID = generate_uuid_string();
-     if (!container->keys[0].key_ID) {
-         free(container->keys[0].key);
-         free(container->keys);
-         container->keys = NULL;
-         return QKD_STATUS_BAD_REQUEST;
-     }
-
-     // For demonstration, store this key in our key_store
-     if (stored_keys < MAX_KEYS) {
-         key_store[stored_keys].key_data = strdup(container->keys[0].key);
-         key_store[stored_keys].key_id = strdup(container->keys[0].key_ID);
-         stored_keys++;
-     }
-
-     
-     return QKD_STATUS_OK;
+ /* Generate deterministic simulated key based on index */
+ static void generate_key(unsigned char *key, uint32_t index) {
+     EVP_MD_CTX *ctx = EVP_MD_CTX_new();
+     EVP_DigestInit_ex(ctx, EVP_sha256(), NULL);
+     EVP_DigestUpdate(ctx, &index, sizeof(index));
+     EVP_DigestFinal_ex(ctx, key, NULL);
+     EVP_MD_CTX_free(ctx);
  }
  
- static uint32_t sim_get_key_with_ids(const char *kme_hostname,
-                                      const char *master_sae_id,
-                                      qkd_key_ids_t *key_ids,
-                                      qkd_key_container_t *container) {
-     usleep(API_DELAY_MS * 1000);
-     
-     if (!key_ids || key_ids->key_ID_count == 0 || !key_ids->key_IDs) {
-         return QKD_STATUS_BAD_REQUEST;
-     }
-     
-     // We could search through the key_store for the key ID, but for simplicity
-     // in this simulation, we'll just return the same key
-     
-     // Fixed test key from ETSI 004
-     static const unsigned char test_key[KEY_SIZE] = {
-         0x8f, 0x40, 0xc5, 0xad, 0xb6, 0x8f, 0x25, 0x62, 0x4a, 0xe5, 0xb2,
-         0x14, 0xea, 0x76, 0x7a, 0x6e, 0xc9, 0x4d, 0x82, 0x9d, 0x3d, 0x7b,
-         0x5e, 0x1a, 0xd1, 0xba, 0x6f, 0x3e, 0x21, 0x38, 0x28, 0x5f
-     };
-     
-     container->key_count = 1;
-     container->keys = calloc(1, sizeof(qkd_key_t));
-     if (!container->keys) {
-         return QKD_STATUS_BAD_REQUEST;
-     }
-     
-     container->keys[0].key = base64_encode(test_key, KEY_SIZE);
-     if (!container->keys[0].key) {
-         free(container->keys);
-         container->keys = NULL;
-         return QKD_STATUS_BAD_REQUEST;
-     }
-     
-     // For completeness, we could include the requested key ID in the response
-     // container->keys[0].key_ID = strdup(key_ids->key_IDs[0].key_ID);
-     
-     return QKD_STATUS_OK;
+ static bool can_generate_key(struct stream_state *stream,
+                              uint32_t requested_index) {
+     uint64_t current_time = get_current_time_ms();
+     uint64_t elapsed_ms = current_time - stream->creation_time;
+ 
+     // Calculate maximum possible keys based on Max_bps
+     uint64_t max_possible_keys = (elapsed_ms * stream->qos.Max_bps) /
+                                  (8000 * stream->qos.Key_chunk_size);
+ 
+     // Check if requested index is within bounds
+     return requested_index < max_possible_keys;
  }
  
- // Cleanup function for releasing memory - will be called externally
- static void sim_cleanup_resources() {
-     for (size_t i = 0; i < stored_keys; i++) {
-         free(key_store[i].key_data);
-         free(key_store[i].key_id);
+ /* Generate metadata JSON for the key */
+ static void generate_metadata(struct qkd_metadata_s *metadata) {
+     if (!metadata || !metadata->Metadata_buffer || metadata->Metadata_size < 50)
+         return;
+     
+     uint64_t current_time = get_current_time_ms();
+     int written = snprintf((char*)metadata->Metadata_buffer, metadata->Metadata_size,
+                          "{\"age\": %lu, \"hops\": 0}", current_time);
+     if (written > 0) {
+         metadata->Metadata_size = written;
      }
-     stored_keys = 0;
  }
  
- const struct qkd_014_backend simulated_backend = {
+ /* Implementation of core functions */
+ static uint32_t sim_open_connect(const char *source, const char *destination,
+                                  struct qkd_qos_s *qos,
+                                  unsigned char *key_stream_id,
+                                  uint32_t *status) {
+     if (!source || !destination || !qos || !key_stream_id || !status) {
+         *status = QKD_STATUS_NO_CONNECTION;
+         return QKD_STATUS_NO_CONNECTION;
+     }
+ 
+     bool is_initiator = (key_stream_id[0] == '\0');
+     if (is_initiator) {
+         memcpy(key_stream_id, test_key_uuid, QKD_KSID_SIZE);
+     }
+ 
+     // Allocate a new stream
+     int stream_idx = allocate_stream();
+     if (stream_idx < 0) {
+         *status = QKD_STATUS_NO_CONNECTION;
+         return QKD_STATUS_NO_CONNECTION;
+     }
+ 
+     // Initialize the stream
+     struct stream_state *stream = &streams[stream_idx];
+     memcpy(stream->key_id, key_stream_id, QKD_KSID_SIZE);
+     memcpy(&stream->qos, qos, sizeof(struct qkd_qos_s));
+     stream->in_use = true;
+     stream->is_initiator = is_initiator;
+     stream->last_index = 0;
+     stream->creation_time = get_current_time_ms();
+     stream->pending_close = false;
+     stream->num_keys = 0;
+ 
+     *status = QKD_STATUS_SUCCESS;
+     return QKD_STATUS_SUCCESS;
+ }
+ 
+ static uint32_t sim_get_key(const unsigned char *key_stream_id, uint32_t *index,
+                             unsigned char *key_buffer,
+                             struct qkd_metadata_s *metadata, uint32_t *status) {
+     if (!key_stream_id || !index || !key_buffer || !status) {
+         *status = QKD_STATUS_NO_CONNECTION;
+         return QKD_STATUS_NO_CONNECTION;
+     }
+ 
+     int stream_idx = find_stream(key_stream_id);
+     if (stream_idx < 0) {
+         *status = QKD_STATUS_PEER_NOT_CONNECTED_GET_KEY;
+         return QKD_STATUS_PEER_NOT_CONNECTED_GET_KEY;
+     }
+ 
+     struct stream_state *stream = &streams[stream_idx];
+     
+     // Check if we can generate a key for this index
+     if (!can_generate_key(stream, *index)) {
+         *status = QKD_STATUS_INSUFFICIENT_KEY;
+         return QKD_STATUS_INSUFFICIENT_KEY;
+     }
+ 
+     // Generate the key
+     generate_key(key_buffer, *index);
+     
+     // Generate metadata if requested
+     if (metadata && metadata->Metadata_buffer && metadata->Metadata_size > 0) {
+         generate_metadata(metadata);
+     }
+ 
+     *status = QKD_STATUS_SUCCESS;
+     return QKD_STATUS_SUCCESS;
+ }
+ 
+ static uint32_t sim_close(const unsigned char *key_stream_id,
+                           uint32_t *status) {
+     if (!key_stream_id || !status) {
+         *status = QKD_STATUS_NO_CONNECTION;
+         return QKD_STATUS_NO_CONNECTION;
+     }
+ 
+     int stream_idx = find_stream(key_stream_id);
+     if (stream_idx < 0) {
+         *status = QKD_STATUS_PEER_NOT_CONNECTED_GET_KEY;
+         return QKD_STATUS_PEER_NOT_CONNECTED_GET_KEY;
+     }
+ 
+     // Mark stream as no longer in use
+     streams[stream_idx].in_use = false;
+ 
+     *status = QKD_STATUS_SUCCESS;
+     return QKD_STATUS_SUCCESS;
+ }
+ 
+ /* Registering simulation */
+ const struct qkd_004_backend simulated_backend = {
      .name = "simulated",
-     .get_status = sim_get_status,
+     .open_connect = sim_open_connect,
      .get_key = sim_get_key,
-     .get_key_with_ids = sim_get_key_with_ids
+     .close = sim_close
  };
  
  #endif /* QKD_USE_SIMULATED */

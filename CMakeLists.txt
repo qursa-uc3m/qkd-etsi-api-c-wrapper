@@ -187,25 +187,41 @@ target_compile_definitions(qkd-etsi-api
 
 if(BUILD_TESTS)
     add_compile_definitions(USE_TEST)
-    # Original test
-    add_executable(etsi014_test
-        tests/etsi014/api_test.c
-    )
-    target_link_libraries(etsi014_test
-        PRIVATE
-        qkd-etsi-api
-    )
-    add_test(NAME etsi014_test COMMAND etsi014_test)
-    if(NOT QKD_BACKEND STREQUAL "simulated")
-        # New comprehensive test
-        add_executable(etsi014_full_test
-            tests/etsi014/api_full_test.c
+    
+    # ETSI004 tests - only build if ETSI004 is enabled
+    if(ENABLE_ETSI004)
+        add_executable(etsi004_test
+            tests/etsi004/api_test.c
         )
-        target_link_libraries(etsi014_full_test
+        target_link_libraries(etsi004_test
             PRIVATE
             qkd-etsi-api
         )
-        add_test(NAME etsi014_full_test COMMAND etsi014_full_test)
+        add_test(NAME etsi004_test COMMAND etsi004_test)
+    endif()
+    
+    # ETSI014 tests - only build if ETSI014 is enabled
+    if(ENABLE_ETSI014)
+        add_executable(etsi014_test
+            tests/etsi014/api_test.c
+        )
+        target_link_libraries(etsi014_test
+            PRIVATE
+            qkd-etsi-api
+        )
+        add_test(NAME etsi014_test COMMAND etsi014_test)
+        
+        if(NOT QKD_BACKEND STREQUAL "simulated")
+            # Full test only for ETSI014 with non-simulated backends
+            add_executable(etsi014_full_test
+                tests/etsi014/api_full_test.c
+            )
+            target_link_libraries(etsi014_full_test
+                PRIVATE
+                qkd-etsi-api
+            )
+            add_test(NAME etsi014_full_test COMMAND etsi014_full_test)
+        endif()
     endif()
 endif()
 
