@@ -1,16 +1,27 @@
-#ifndef QKD_CONFIG_H
-#define QKD_CONFIG_H
+/*
+ * Copyright (C) 2024 QURSA Project
+ * SPDX-License-Identifier: MIT
+ *
+ * Authors:
+ * - Javier Blanco-Romero (@fj-blanco) - UC3M
+ */
 
-#cmakedefine01 QKD_USE_QUKAYDEE
-#cmakedefine01 QKD_USE_CERBERIS_XGR
-#cmakedefine01 QKD_USE_SIMULATED
-
-#if QKD_USE_QUKAYDEE
-#define QKD_BACKEND_TYPE "qukaydee"
-#elif QKD_USE_CERBERIS_XGR
-#define QKD_BACKEND_TYPE "cerberis_xgr"
-#elif QKD_USE_SIMULATED
-#define QKD_BACKEND_TYPE "simulated"
-#endif
-
-#endif /* QKD_CONFIG_H */
+ #ifndef QKD_CONFIG_H
+ #define QKD_CONFIG_H
+ 
+ #cmakedefine01 QKD_USE_QUKAYDEE
+ #cmakedefine01 QKD_USE_CERBERIS_XGR
+ #cmakedefine01 QKD_USE_SIMULATED
+ #cmakedefine01 QKD_USE_PYTHON_CLIENT
+ 
+ #if QKD_USE_QUKAYDEE
+ #define QKD_BACKEND_TYPE "qukaydee"
+ #elif QKD_USE_CERBERIS_XGR
+ #define QKD_BACKEND_TYPE "cerberis_xgr"
+ #elif QKD_USE_SIMULATED
+ #define QKD_BACKEND_TYPE "simulated"
+ #elif QKD_USE_PYTHON_CLIENT
+ #define QKD_BACKEND_TYPE "python_client"
+ #endif
+ 
+ #endif /* QKD_CONFIG_H */
