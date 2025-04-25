@@ -29,7 +29,7 @@
                                   .TTL = 1};
  
      // Responder connects with existing KSID
-     status = OPEN_CONNECT("qkd://localhost/bob", "qkd://localhost/alice",
+     status = OPEN_CONNECT("server://localhost:25576", "server://localhost:25575",
                            &peer_qos, (unsigned char *)ksid, &status);
      assert(status == QKD_STATUS_SUCCESS);
  }
@@ -44,8 +44,8 @@
                              .Timeout = 1000,
                              .TTL = 1};
      unsigned char key_stream_id[QKD_KSID_SIZE] = {0};
-     const char *source = "qkd://localhost/alice";
-     const char *destination = "qkd://localhost/bob";
+     const char *source = "server://localhost:25575";
+     const char *destination = "server://localhost:25576";
  
      printf("Testing OPEN_CONNECT/CLOSE...\n");
  
@@ -102,8 +102,8 @@
      unsigned char key_buffer2[QKD_KEY_SIZE];
      uint32_t index = 0;
      struct qkd_metadata_s metadata = {0};
-     const char *source = "qkd://localhost/alice";
-     const char *destination = "qkd://localhost/bob";
+     const char *source = "server://localhost:25575";
+     const char *destination = "server://localhost:25576";
  
      printf("\nTesting GET_KEY...\n");
  

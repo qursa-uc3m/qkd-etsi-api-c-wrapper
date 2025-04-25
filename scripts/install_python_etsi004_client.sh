@@ -15,7 +15,6 @@ set -e
 GITHUB_REPO="https://raw.githubusercontent.com/QUBIP/etsi-qkd-004/ksid_sync/client/client.py"
 MODULE_NAME="qkd_client.py"
 DEST_DIR="${HOME}/.local/lib/qkd"
-LOCAL_FILE_PATH="/home/javi/Documents/apps/QURSA/qkd-etsi-api-c-wrapper/etsi-qkd-004/client/client.py"  # Hardcoded local file path
 
 echo "Installing ETSI-004 Python Client..."
 
