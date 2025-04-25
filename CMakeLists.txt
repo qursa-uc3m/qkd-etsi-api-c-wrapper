@@ -7,7 +7,7 @@
 
 cmake_minimum_required(VERSION 3.10)
 
-project(qkd-etsi-api 
+project(qkd-etsi-api-c-wrapper
         VERSION 1.0
         LANGUAGES C)
 
@@ -29,8 +29,8 @@ set(COMMON_INCLUDES
 )
 
 # QKD backend selection
-set(QKD_BACKEND "simulated" CACHE STRING "Select QKD backend (simulated, cerberis_xgr, qukaydee)")
-set_property(CACHE QKD_BACKEND PROPERTY STRINGS simulated cerberis_xgr qukaydee)
+set(QKD_BACKEND "simulated" CACHE STRING "Select QKD backend (simulated, cerberis_xgr, qukaydee, python_client)")
+set_property(CACHE QKD_BACKEND PROPERTY STRINGS simulated cerberis_xgr qukaydee python_client)
 
 find_package(OpenSSL REQUIRED)
 if(ENABLE_ETSI014 AND (QKD_BACKEND STREQUAL "cerberis_xgr" OR QKD_BACKEND STREQUAL "qukaydee"))
@@ -42,6 +42,14 @@ else()
     set(ENABLE_ETSI014_BACKEND FALSE)
 endif()
 
+# Check for Python when using python_client backend
+if(QKD_BACKEND STREQUAL "python_client")
+    find_package(Python3 COMPONENTS Development REQUIRED)
+    list(APPEND COMMON_INCLUDES ${Python3_INCLUDE_DIRS})
+    message(STATUS "Found Python: ${Python3_VERSION}")
+    message(STATUS "Python include directories: ${Python3_INCLUDE_DIRS}")
+endif()
+
 if(QKD_BACKEND STREQUAL "simulated")
     add_compile_definitions(QKD_USE_SIMULATED)
 elseif(QKD_BACKEND STREQUAL "cerberis_xgr" OR QKD_BACKEND STREQUAL "qukaydee")
@@ -51,6 +59,8 @@ elseif(QKD_BACKEND STREQUAL "cerberis_xgr" OR QKD_BACKEND STREQUAL "qukaydee")
         add_compile_definitions(QKD_USE_QUKAYDEE)
     endif()
     add_compile_definitions(QKD_USE_ETSI014_BACKEND)
+elseif(QKD_BACKEND STREQUAL "python_client")
+    add_compile_definitions(QKD_USE_PYTHON_CLIENT)
 endif()
 
 # Display API and backend configuration
@@ -59,8 +69,10 @@ if(ENABLE_ETSI004)
     message(STATUS "  -> Using ETSI004 API")
     if(QKD_BACKEND STREQUAL "simulated")
         message(STATUS "     Backend: Simulated")
+    elseif(QKD_BACKEND STREQUAL "python_client")
+        message(STATUS "     Backend: Python Client")
     else()
-        message(WARNING "     Error: ETSI004 only supports simulated backend")
+        message(WARNING "     Error: ETSI004 only supports simulated or python_client backends")
     endif()
 elseif(ENABLE_ETSI014)
     message(STATUS "  -> Using ETSI014 API")
@@ -76,6 +88,8 @@ elseif(ENABLE_ETSI014)
         if(NOT ENABLE_ETSI014_BACKEND)
             message(WARNING "     Warning: Backend support not available")
         endif()
+    elseif(QKD_BACKEND STREQUAL "python_client")
+        message(STATUS "     Backend: Python Client")
     endif()
 else()
     message(WARNING "No ETSI API enabled!")
@@ -86,14 +100,22 @@ if(QKD_BACKEND STREQUAL "simulated")
     set(QKD_USE_SIMULATED 1)
     set(QKD_USE_CERBERIS_XGR 0)
     set(QKD_USE_QUKAYDEE 0)
+    set(QKD_USE_PYTHON_CLIENT 0)
 elseif(QKD_BACKEND STREQUAL "cerberis_xgr")
     set(QKD_USE_SIMULATED 0)
     set(QKD_USE_CERBERIS_XGR 1)
     set(QKD_USE_QUKAYDEE 0)
-else()
+    set(QKD_USE_PYTHON_CLIENT 0)
+elseif(QKD_BACKEND STREQUAL "qukaydee")
     set(QKD_USE_SIMULATED 0)
     set(QKD_USE_CERBERIS_XGR 0)
     set(QKD_USE_QUKAYDEE 1)
+    set(QKD_USE_PYTHON_CLIENT 0)
+elseif(QKD_BACKEND STREQUAL "python_client")
+    set(QKD_USE_SIMULATED 0)
+    set(QKD_USE_CERBERIS_XGR 0)
+    set(QKD_USE_QUKAYDEE 0)
+    set(QKD_USE_PYTHON_CLIENT 1)
 endif()
 
 configure_file(
@@ -124,6 +146,10 @@ if(ENABLE_ETSI004)
         list(APPEND API_SOURCES 
             src/etsi004/backends/qkd_etsi014_backend.c
         )
+    elseif(QKD_BACKEND STREQUAL "python_client")
+        list(APPEND API_SOURCES 
+            src/etsi004/backends/python_client.c
+        )
     endif()
 endif()
 
@@ -139,7 +165,7 @@ if(ENABLE_ETSI014)
         list(APPEND API_SOURCES 
             src/etsi014/backends/simulated.c
         )
-        elseif(QKD_BACKEND STREQUAL "cerberis_xgr" OR QKD_BACKEND STREQUAL "qukaydee")
+    elseif(QKD_BACKEND STREQUAL "cerberis_xgr" OR QKD_BACKEND STREQUAL "qukaydee")
         list(APPEND API_SOURCES 
             src/etsi014/backends/qkd_etsi014_backend.c
         )
@@ -147,42 +173,55 @@ if(ENABLE_ETSI014)
             ${CURL_INCLUDE_DIRS}
             ${JANSSON_INCLUDE_DIRS}
         )
+    elseif(QKD_BACKEND STREQUAL "python_client")
+        # If you need Python client for ETSI014 as well, add the source here
     endif()
 endif()
 
 # Create unified library
-add_library(qkd-etsi-api SHARED ${API_SOURCES})
+add_library(qkd-etsi-api-c-wrapper SHARED ${API_SOURCES})
 
-target_include_directories(qkd-etsi-api
+target_include_directories(qkd-etsi-api-c-wrapper
     PUBLIC 
         ${COMMON_INCLUDES}
 )
 
-target_link_libraries(qkd-etsi-api
-    PUBLIC
-        OpenSSL::Crypto
-        OpenSSL::SSL
-        $<$<AND:$<BOOL:${ENABLE_ETSI014}>,$<BOOL:${ENABLE_ETSI014_BACKEND}>>:${CURL_LIBRARIES}>
-        $<$<AND:$<BOOL:${ENABLE_ETSI014}>,$<BOOL:${ENABLE_ETSI014_BACKEND}>>:${JANSSON_LIBRARIES}>
+# Create the link libraries list
+set(LINK_LIBRARIES
+    OpenSSL::Crypto
+    OpenSSL::SSL
 )
+
+# Add Python libraries if needed
+if(QKD_BACKEND STREQUAL "python_client")
+    list(APPEND LINK_LIBRARIES ${Python3_LIBRARIES})
+endif()
+
+# Add CURL and Jansson if needed
+if(ENABLE_ETSI014 AND ENABLE_ETSI014_BACKEND)
+    list(APPEND LINK_LIBRARIES ${CURL_LIBRARIES} ${JANSSON_LIBRARIES})
+endif()
+
+target_link_libraries(qkd-etsi-api-c-wrapper PUBLIC ${LINK_LIBRARIES})
 
 if(WIN32)
   # On Windows, adjust if needed.
 else()
   find_library(UUID_LIB uuid)
   if(UUID_LIB)
-    target_link_libraries(qkd-etsi-api PUBLIC ${UUID_LIB})
+    target_link_libraries(qkd-etsi-api-c-wrapper PUBLIC ${UUID_LIB})
   else()
     message(FATAL_ERROR "UUID library not found!")
   endif()
 endif()
 
-target_compile_definitions(qkd-etsi-api
+target_compile_definitions(qkd-etsi-api-c-wrapper
     PRIVATE
         $<$<BOOL:${QKD_DEBUG_LEVEL}>:QKD_DEBUG_LEVEL=${QKD_DEBUG_LEVEL}>
         $<$<BOOL:${ENABLE_ETSI004}>:ENABLE_ETSI004>
         $<$<BOOL:${ENABLE_ETSI014}>:ENABLE_ETSI014>
         $<$<STREQUAL:${QKD_BACKEND},simulated>:QKD_USE_SIMULATED>
+        $<$<STREQUAL:${QKD_BACKEND},python_client>:QKD_USE_PYTHON_CLIENT>
 )
 
 if(BUILD_TESTS)
@@ -195,7 +234,7 @@ if(BUILD_TESTS)
         )
         target_link_libraries(etsi004_test
             PRIVATE
-            qkd-etsi-api
+            qkd-etsi-api-c-wrapper
         )
         add_test(NAME etsi004_test COMMAND etsi004_test)
     endif()
@@ -207,7 +246,7 @@ if(BUILD_TESTS)
         )
         target_link_libraries(etsi014_test
             PRIVATE
-            qkd-etsi-api
+            qkd-etsi-api-c-wrapper
         )
         add_test(NAME etsi014_test COMMAND etsi014_test)
         
@@ -218,7 +257,7 @@ if(BUILD_TESTS)
             )
             target_link_libraries(etsi014_full_test
                 PRIVATE
-                qkd-etsi-api
+                qkd-etsi-api-c-wrapper
             )
             add_test(NAME etsi014_full_test COMMAND etsi014_full_test)
         endif()
@@ -226,33 +265,33 @@ if(BUILD_TESTS)
 endif()
 
 # Installation
-install(TARGETS qkd-etsi-api
+install(TARGETS qkd-etsi-api-c-wrapper
     LIBRARY DESTINATION lib
     ARCHIVE DESTINATION lib
-    PUBLIC_HEADER DESTINATION include/qkd-etsi-api
+    PUBLIC_HEADER DESTINATION include/qkd-etsi-api-c-wrapper
 )
 
 install(FILES
     include/debug.h
     include/qkd_etsi_api.h
-    DESTINATION include/qkd-etsi-api
+    DESTINATION include/qkd-etsi-api-c-wrapper
 )
 
 install(FILES
     ${CMAKE_CURRENT_BINARY_DIR}/qkd_config.h
-    DESTINATION include/qkd-etsi-api
+    DESTINATION include/qkd-etsi-api-c-wrapper
 )
 
 if(ENABLE_ETSI004)
     install(DIRECTORY include/etsi004/
-        DESTINATION include/qkd-etsi-api/etsi004
+        DESTINATION include/qkd-etsi-api-c-wrapper/etsi004
         FILES_MATCHING PATTERN "*.h"
     )
 endif()
 
 if(ENABLE_ETSI014)
     install(DIRECTORY include/etsi014/
-        DESTINATION include/qkd-etsi-api/etsi014
+        DESTINATION include/qkd-etsi-api-c-wrapper/etsi014
         FILES_MATCHING PATTERN "*.h"
     )
 endif()

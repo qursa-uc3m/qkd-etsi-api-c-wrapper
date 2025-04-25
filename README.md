@@ -92,22 +92,6 @@ make
 
 ## Running the tests
 
-After building the project with `-DBUILD_TESTS=ON`, you can run the tests with:
-
-```bash
-ctest
-```
-
-or
-
-```bash
-# For ETSI 004
-./etsi004_test
-
-# For ETSI 014
-./etsi014_test
-```
-
 ### Testing ETSI014 with cerberis_xgr
 
 When testing the ETSI014 API with the `cerberis_xgr` backend, the following environment variables must be set:
@@ -156,3 +140,109 @@ In case real nodes are not available for real tests, it can be used  emulators t
 > _"Its main goal is to allow users to test integration of their classical systems with the QKD network without needing physical QKD hardware. For example, network equipment vendors or service providers can test wether their encryptor devices are interoperable with the key delivery interface provided by QKD devices."_
 
 By following the tutorial on its web page it can be generated the necessary certificates to make the requests to the nodes in the cloud. To test them together with this project, the paths to the certificates simply have to be specified as environment variables as explained in the previous section.
+
+### Testing ETSI 004 with QUBIP's ETSI 004 simulated backend
+
+[QUBIP's etsi-qkd-004](https://github.com/QUBIP/etsi-qkd-004/tree/ksid_sync) contains a simulated key generator and a KMS that allows you to test the ETSI 004 API.
+
+#### Python Client Integration
+
+This Python client integration:
+
+- Uses the original QUBIP Python client code for ETSI-004
+- Our C wrapper imports this as a Python module through the Python C API
+- Creates a `.pth` file in your user's site-packages directory to make the module importable without environment variable changes
+
+#### Setting up the Environment
+
+Install the Python client module:
+
+```bash
+./scripts/install_python_etsi004_client.sh
+```
+
+This script:
+
+- Downloads the Python client from the QUBIP repository
+- Installs it to `~/.local/lib/qkd/qkd_client.py`
+- Creates a `.pth` file in your user's site-packages directory to make the module importable
+
+Clone and set up the QUBIP server (required for tests):
+
+```bash
+git clone https://github.com/QUBIP/etsi-qkd-004.git
+cd etsi-qkd-004
+```
+
+#### Generate certificates for the server
+
+```bash
+sudo chmod +x ./certs/generate_certs.sh
+./certs/generate_certs.sh qkd_server_alice
+./certs/generate_certs.sh qkd_server_bob
+# Generate certificates for localhost (required for client-server communication)
+./certs/generate_certs.sh localhost
+```
+
+#### Modify Docker configuration to use localhost certificates
+
+Edit the docker-compose.yml file to use the localhost certificates instead of the server-specific ones:
+
+```bash
+nano docker-compose.yml
+```
+
+Update the certificate paths for both server containers. For example, for qkd_server_bob:
+
+```yaml
+qkd_server_bob:
+  build: ./server
+  container_name: qkd_server_bob
+  environment:
+    - SERVER_CERT_PEM=/certs/server_cert_localhost.pem  # Server public key
+    - SERVER_CERT_KEY=/certs/server_key_localhost.pem  # Server private key
+    - CLIENT_CERT_PEM=/certs/client_cert_localhost.pem  # Client public key
+    # Keep the rest of the settings unchanged
+```
+
+Do the same for qkd_server_alice. Then start the servers:
+
+#### Run the servers
+
+```bash
+docker compose up --build -d qkd_server_alice qkd_server_bob generate_key_alice generate_key_bob
+```
+
+#### Configure the client to connect to the server:
+
+Source this environment variables
+
+```bash
+source ./scripts/etsi004_env.sh
+```
+
+Building the Project
+
+```bash
+mkdir build
+cd build
+cmake -DQKD_BACKEND=python_client -DENABLE_ETSI014=OFF -DENABLE_ETSI004=ON -DQKD_DEBUG_LEVEL=4 -DBUILD_TESTS=ON ..
+make
+```
+
+#### Testing
+
+Run the ETSI 004 test with the Python client backend:
+
+```bash
+cd build
+./etsi004_test
+```
+
+The tests will connect to the running QUBIP server and perform QKD operations through the standardized ETSI 004 API.
+
+Finally put the server down:
+
+```bash
+docker-compose down && sudo docker system prune -a --volumes
+```
