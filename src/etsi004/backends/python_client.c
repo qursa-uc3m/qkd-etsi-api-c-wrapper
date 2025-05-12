@@ -370,7 +370,7 @@ static uint32_t python_client_get_key(const unsigned char *key_stream_id, uint32
         }
         return QKD_STATUS_NO_CONNECTION;
     }
-
+    
     // Call get_key() method on the Python client
     PyObject *py_get_key_method = PyObject_GetAttrString(py_qkd_client_instance, "get_key");
     if (!py_get_key_method || !PyCallable_Check(py_get_key_method)) {
@@ -381,15 +381,82 @@ static uint32_t python_client_get_key(const unsigned char *key_stream_id, uint32
         }
         return QKD_STATUS_NO_CONNECTION;
     }
-
-    PyObject *py_args = PyTuple_New(2);
-    PyTuple_SetItem(py_args, 0, PyLong_FromLong(*index));
-    PyTuple_SetItem(py_args, 1, PyLong_FromLong(metadata->Metadata_size));
-
+    
+    // Import uuid module
+    PyObject *py_uuid_module = PyImport_ImportModule("uuid");
+    if (!py_uuid_module) {
+        PyErr_Print();
+        Py_XDECREF(py_get_key_method);
+        if (status) {
+            *status = QKD_STATUS_NO_CONNECTION;
+        }
+        return QKD_STATUS_NO_CONNECTION;
+    }
+    
+    // Get the UUID class
+    PyObject *py_uuid_class = PyObject_GetAttrString(py_uuid_module, "UUID");
+    if (!py_uuid_class) {
+        Py_DECREF(py_uuid_module);
+        Py_XDECREF(py_get_key_method);
+        PyErr_Print();
+        if (status) {
+            *status = QKD_STATUS_NO_CONNECTION;
+        }
+        return QKD_STATUS_NO_CONNECTION;
+    }
+    
+    // Create a bytes object from the binary key_id
+    PyObject *py_key_bytes = PyBytes_FromStringAndSize((const char *)key_stream_id, 16);
+    
+    // Create keyword arguments dictionary for UUID constructor
+    PyObject *py_kwargs = PyDict_New();
+    PyDict_SetItemString(py_kwargs, "bytes", py_key_bytes);
+    
+    // Create a UUID object using UUID(bytes=key_bytes)
+    PyObject *py_uuid = PyObject_Call(py_uuid_class, PyTuple_New(0), py_kwargs);
+    
+    // Clean up UUID-related objects we don't need anymore
+    Py_DECREF(py_uuid_module);
+    Py_DECREF(py_uuid_class);
+    Py_DECREF(py_key_bytes);
+    Py_DECREF(py_kwargs);
+    
+    if (!py_uuid) {
+        PyErr_Print();
+        Py_XDECREF(py_get_key_method);
+        if (status) {
+            *status = QKD_STATUS_NO_CONNECTION;
+        }
+        return QKD_STATUS_NO_CONNECTION;
+    }
+    
+    // Create substantial JSON string for metadata
+    const char *json = "{\"format\":\"json\",\"version\":\"1.0\",\"source\":\"qkd_client\"}";
+    size_t json_len = strlen(json);
+    
+    // Make sure it fits in the buffer
+    if (json_len < metadata->Metadata_size) {
+        // Copy it to the metadata buffer
+        memcpy(metadata->Metadata_buffer, json, json_len);
+        metadata->Metadata_buffer[json_len] = '\0';
+    }
+    
+    // IMPORTANT: Pass the metadata as BYTES, not a dictionary
+    // The client's get_key() method expects a bytes-like object, not a dictionary
+    PyObject *py_metadata_bytes = PyBytes_FromStringAndSize(
+        (const char *)metadata->Metadata_buffer, 
+        metadata->Metadata_size);
+    
+    // Now create a tuple with 3 arguments: UUID object, index, and metadata bytes
+    PyObject *py_args = PyTuple_New(3);
+    PyTuple_SetItem(py_args, 0, py_uuid);          // UUID object
+    PyTuple_SetItem(py_args, 1, PyLong_FromLong(*index));
+    PyTuple_SetItem(py_args, 2, py_metadata_bytes);  // Bytes object
+    
     PyObject *py_get_key_result = PyObject_CallObject(py_get_key_method, py_args);
     Py_DECREF(py_args);
     Py_DECREF(py_get_key_method);
-
+    
     if (!py_get_key_result || !PyTuple_Check(py_get_key_result)) {
         PyErr_Print();
         Py_XDECREF(py_get_key_result);
@@ -398,11 +465,11 @@ static uint32_t python_client_get_key(const unsigned char *key_stream_id, uint32
         }
         return QKD_STATUS_PEER_NOT_CONNECTED_GET_KEY;
     }
-
+    
     // Extract status, key_material, and metadata from the result tuple
     PyObject *py_status = PyTuple_GetItem(py_get_key_result, 0);
     uint32_t status_value = (uint32_t)PyLong_AsLong(py_status);
-
+    
     if (status_value == QKD_STATUS_SUCCESS) {
         // Get key material from the result
         PyObject *py_key_material = PyTuple_GetItem(py_get_key_result, 1);
@@ -413,7 +480,7 @@ static uint32_t python_client_get_key(const unsigned char *key_stream_id, uint32
             // Copy key material to the output buffer
             memcpy(key_buffer, key_data, key_len);
         }
-
+        
         // Get metadata from the result
         PyObject *py_metadata = PyTuple_GetItem(py_get_key_result, 2);
         if (py_metadata && PyUnicode_Check(py_metadata)) {
@@ -432,9 +499,9 @@ static uint32_t python_client_get_key(const unsigned char *key_stream_id, uint32
             }
         }
     }
-
+    
     Py_DECREF(py_get_key_result);
-
+    
     if (status) {
         *status = status_value;
     }
