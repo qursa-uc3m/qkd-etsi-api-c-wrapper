@@ -283,43 +283,80 @@ static uint32_t python_client_open_connect(const char *source, const char *desti
         return QKD_STATUS_NO_CONNECTION;
     }
 
-    // Extract status and key_stream_id from the result tuple
-    PyObject *py_status = PyTuple_GetItem(py_open_connect_result, 0);
-    uint32_t status_value = (uint32_t)PyLong_AsLong(py_status);
-
-    if (status_value == QKD_STATUS_SUCCESS || status_value == QKD_STATUS_QOS_NOT_MET) {
-        // Get the key_stream_id from the result
+    Py_ssize_t tuple_size = PyTuple_Size(py_open_connect_result);
+    QKD_DBG_INFO("Python open_connect returned tuple of size %zd", tuple_size);
+    
+    uint32_t status_value = QKD_STATUS_NO_CONNECTION;
+    
+    if (tuple_size >= 3) {
+        PyObject *py_returned_qos = PyTuple_GetItem(py_open_connect_result, 0);
         PyObject *py_key_stream_id = PyTuple_GetItem(py_open_connect_result, 1);
+        PyObject *py_status_obj = PyTuple_GetItem(py_open_connect_result, 2);
         
-        // Get the bytes attribute of the UUID
-        PyObject *py_bytes = PyObject_GetAttrString(py_key_stream_id, "bytes");
-        if (!py_bytes || !PyBytes_Check(py_bytes)) {
-            PyErr_Print();
-            Py_XDECREF(py_bytes);
-            Py_DECREF(py_open_connect_result);
-            if (status) {
-                *status = QKD_STATUS_NO_CONNECTION;
+        // Extract status value
+        if (py_status_obj && PyLong_Check(py_status_obj)) {
+            status_value = (uint32_t)PyLong_AsLong(py_status_obj);
+        }
+        QKD_DBG_INFO("Status value extracted from tuple: %u", status_value);
+        
+        // Update QoS from returned values
+        if (py_returned_qos && PyDict_Check(py_returned_qos)) {
+            convert_python_to_qos(py_returned_qos, qos);
+            QKD_DBG_INFO("QoS updated from returned values");
+        }
+        
+        // Process key_stream_id if status is success or QoS_NOT_MET
+        if ((status_value == QKD_STATUS_SUCCESS || status_value == QKD_STATUS_QOS_NOT_MET || 
+             status_value == QKD_STATUS_PEER_NOT_CONNECTED) && 
+            py_key_stream_id && py_key_stream_id != Py_None) {
+            
+            // Get the bytes attribute of the UUID
+            PyObject *py_bytes = PyObject_GetAttrString(py_key_stream_id, "bytes");
+            if (py_bytes && PyBytes_Check(py_bytes)) {
+                // Copy the UUID bytes to the output buffer
+                memcpy(key_stream_id, PyBytes_AsString(py_bytes), QKD_KSID_SIZE);
+                QKD_DBG_INFO("Key stream ID extracted successfully");
+                Py_DECREF(py_bytes);
+            } else {
+                PyErr_Clear();
+                memset(key_stream_id, 0, QKD_KSID_SIZE);  // Set to zeros if no valid UUID
+                QKD_DBG_ERR("Failed to extract key stream ID bytes");
             }
-            return QKD_STATUS_NO_CONNECTION;
+        } else {
+            // No valid key stream ID or status not successful
+            memset(key_stream_id, 0, QKD_KSID_SIZE);
+            QKD_DBG_INFO("Key stream ID not available or status not successful");
         }
+    } else {
+        // Tuple doesn't have enough elements
+        QKD_DBG_ERR("Python open_connect returned tuple with insufficient elements");
+        memset(key_stream_id, 0, QKD_KSID_SIZE);
+    }
 
-        // Copy the UUID bytes to the output buffer
-        memcpy(key_stream_id, PyBytes_AsString(py_bytes), QKD_KSID_SIZE);
-        Py_DECREF(py_bytes);
-
-        // Get the updated QoS from the Python client
-        PyObject *py_updated_qos = PyObject_GetAttrString(py_qkd_client_instance, "qos");
-        if (py_updated_qos && PyDict_Check(py_updated_qos)) {
-            convert_python_to_qos(py_updated_qos, qos);
-            Py_DECREF(py_updated_qos);
-        }
+    PyObject *py_updated_qos = PyObject_GetAttrString(py_qkd_client_instance, "qos");
+    if (py_updated_qos && PyDict_Check(py_updated_qos)) {
+        convert_python_to_qos(py_updated_qos, qos);
+        QKD_DBG_INFO("QoS updated from client instance");
+        Py_DECREF(py_updated_qos);
     }
 
     Py_DECREF(py_open_connect_result);
 
+    // Set the status parameter
     if (status) {
         *status = status_value;
+        QKD_DBG_INFO("Setting output status parameter to %u", status_value);
     }
+
+    // Special case for QKD_STATUS_QOS_NOT_MET
+    if (status_value == QKD_STATUS_QOS_NOT_MET) {
+        QKD_DBG_INFO("QoS not met but connection established with adjusted parameters");
+        // Return SUCCESS since this is actually a success case with adjusted parameters
+        return QKD_STATUS_SUCCESS;
+    }
+
+    // Return the status value
+    QKD_DBG_INFO("Returning status value %u from open_connect", status_value);
     return status_value;
 }
 
