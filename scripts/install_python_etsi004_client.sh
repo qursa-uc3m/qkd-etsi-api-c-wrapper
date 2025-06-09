@@ -15,7 +15,28 @@ set -e
 GITHUB_REPO="https://raw.githubusercontent.com/QUBIP/etsi-qkd-004/ksid_sync/client/client.py"
 MODULE_NAME="qkd_client.py"
 DEST_DIR="${HOME}/.local/lib/qkd"
-LOCAL_FILE_PATH="/home/javi/Documents/apps/QURSA/qkd-etsi-api-c-wrapper/etsi-qkd-004/client/client.py"  # Hardcoded local file path
+LOCAL_FILE_PATH="${QKD_CLIENT_LOCAL_PATH:-}"
+
+# If no environment variable set, try to auto-detect common locations
+if [ -z "$LOCAL_FILE_PATH" ]; then
+    echo "No QKD_CLIENT_LOCAL_PATH set, checking common locations..."
+    
+    # Check common relative paths
+    POTENTIAL_PATHS=(
+        "./client/client.py"
+        "./etsi-qkd-004/client/client.py"
+        "../etsi-qkd-004/client/client.py"
+        "../../etsi-qkd-004/client/client.py"
+    )
+    
+    for path in "${POTENTIAL_PATHS[@]}"; do
+        if [ -f "$path" ]; then
+            LOCAL_FILE_PATH="$path"
+            echo "Found local file at: $LOCAL_FILE_PATH"
+            break
+        fi
+    done
+fi
 
 echo "Installing ETSI-004 Python Client..."
 
@@ -23,12 +44,15 @@ echo "Installing ETSI-004 Python Client..."
 mkdir -p "${DEST_DIR}"
 
 # Check if the local file exists
-if [ -f "${LOCAL_FILE_PATH}" ]; then
+if [ -n "$LOCAL_FILE_PATH" ] && [ -f "$LOCAL_FILE_PATH" ]; then
     echo "Using local file: ${LOCAL_FILE_PATH}"
     cp "${LOCAL_FILE_PATH}" "${DEST_DIR}/${MODULE_NAME}"
 else
     # Download the client if local file doesn't exist
-    echo "Local file not found at ${LOCAL_FILE_PATH}. Downloading from ${GITHUB_REPO}..."
+    if [ -n "$LOCAL_FILE_PATH" ]; then
+        echo "Local file not found at ${LOCAL_FILE_PATH}."
+    fi
+    echo "Downloading from ${GITHUB_REPO}..."
     if command -v curl &> /dev/null; then
         curl -s -o "${DEST_DIR}/${MODULE_NAME}" "${GITHUB_REPO}"
     elif command -v wget &> /dev/null; then
