@@ -44,10 +44,33 @@ endif()
 
 # Check for Python when using python_client backend
 if(QKD_BACKEND STREQUAL "python_client")
-    find_package(Python3 COMPONENTS Development REQUIRED)
-    list(APPEND COMMON_INCLUDES ${Python3_INCLUDE_DIRS})
-    message(STATUS "Found Python: ${Python3_VERSION}")
-    message(STATUS "Python include directories: ${Python3_INCLUDE_DIRS}")
+    # Try to find python3-config
+    find_program(PYTHON3_CONFIG python3-config)
+    if(PYTHON3_CONFIG)
+        execute_process(
+            COMMAND ${PYTHON3_CONFIG} --includes
+            OUTPUT_VARIABLE Python3_CFLAGS
+            OUTPUT_STRIP_TRAILING_WHITESPACE
+        )
+        execute_process(
+            COMMAND ${PYTHON3_CONFIG} --ldflags
+            OUTPUT_VARIABLE Python3_LDFLAGS
+            OUTPUT_STRIP_TRAILING_WHITESPACE
+        )
+        
+        # Extract include directory
+        string(REGEX REPLACE "^-I([^ ]+).*" "\\1" Python3_INCLUDE_DIRS "${Python3_CFLAGS}")
+        
+        message(STATUS "Found Python via python3-config:")
+        message(STATUS "  Include: ${Python3_INCLUDE_DIRS}")
+        message(STATUS "  LDFLAGS: ${Python3_LDFLAGS}")
+        
+        set(Python3_FOUND TRUE)
+        set(Python3_LIBRARIES "${Python3_LDFLAGS}")
+        list(APPEND COMMON_INCLUDES ${Python3_INCLUDE_DIRS})
+    else()
+        message(FATAL_ERROR "python3-config not found")
+    endif()
 endif()
 
 if(QKD_BACKEND STREQUAL "simulated")
@@ -194,7 +217,17 @@ set(LINK_LIBRARIES
 
 # Add Python libraries if needed
 if(QKD_BACKEND STREQUAL "python_client")
-    list(APPEND LINK_LIBRARIES ${Python3_LIBRARIES})
+    # Get the library directory and add python library directly
+    execute_process(
+        COMMAND ${PYTHON3_CONFIG} --embed --ldflags
+        OUTPUT_VARIABLE Python3_EMBED_LDFLAGS
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+    )
+    
+    # Add the embed flags which include the proper library linking
+    string(REPLACE " " ";" Python3_EMBED_FLAGS_LIST "${Python3_EMBED_LDFLAGS}")
+    list(APPEND LINK_LIBRARIES ${Python3_EMBED_FLAGS_LIST})
+    message(STATUS "Added Python embed libraries: ${Python3_EMBED_FLAGS_LIST}")
 endif()
 
 # Add CURL and Jansson if needed
@@ -203,6 +236,10 @@ if(ENABLE_ETSI014 AND ENABLE_ETSI014_BACKEND)
 endif()
 
 target_link_libraries(qkd-etsi-api-c-wrapper PUBLIC ${LINK_LIBRARIES})
+
+if(QKD_BACKEND STREQUAL "python_client")
+    message(STATUS "Final LINK_LIBRARIES for qkd-etsi-api-c-wrapper: ${LINK_LIBRARIES}")
+endif()
 
 if(WIN32)
   # On Windows, adjust if needed.
