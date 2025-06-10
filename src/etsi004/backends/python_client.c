@@ -255,20 +255,99 @@ static uint32_t python_client_open_connect(const char *source, const char *desti
     }
     Py_DECREF(py_connect_result);
 
+    // CRITICAL FIX: Convert the input key_stream_id to a Python UUID object
+    PyObject *py_key_stream_id = NULL;
+    
+    // Debug: Print the key_stream_id we received
+    QKD_DBG_INFO("C wrapper received key_stream_id:");
+    for (int i = 0; i < QKD_KSID_SIZE; i++) {
+        fprintf(stderr, "%02x ", key_stream_id[i]);
+    }
+    fprintf(stderr, "\n");
+    
+    // Check if key_stream_id is all zeros (null UUID)
+    bool is_null_uuid = true;
+    for (int i = 0; i < QKD_KSID_SIZE; i++) {
+        if (key_stream_id[i] != 0) {
+            is_null_uuid = false;
+            break;
+        }
+    }
+    
+    if (is_null_uuid) {
+        // Alice case: pass None to request a new KSID
+        py_key_stream_id = Py_None;
+        Py_INCREF(Py_None);
+        QKD_DBG_INFO("Passing None to Python client (Alice case - new session)");
+    } else {
+        // Bob case: convert Alice's KSID to Python UUID
+        PyObject *py_uuid_module = PyImport_ImportModule("uuid");
+        if (!py_uuid_module) {
+            PyErr_Print();
+            if (status) {
+                *status = QKD_STATUS_NO_CONNECTION;
+            }
+            return QKD_STATUS_NO_CONNECTION;
+        }
+        
+        PyObject *py_uuid_class = PyObject_GetAttrString(py_uuid_module, "UUID");
+        if (!py_uuid_class) {
+            Py_DECREF(py_uuid_module);
+            PyErr_Print();
+            if (status) {
+                *status = QKD_STATUS_NO_CONNECTION;
+            }
+            return QKD_STATUS_NO_CONNECTION;
+        }
+        
+        // Create a bytes object from the key_stream_id
+        PyObject *py_key_bytes = PyBytes_FromStringAndSize((const char *)key_stream_id, QKD_KSID_SIZE);
+        
+        // Create keyword arguments dictionary for UUID constructor
+        PyObject *py_kwargs = PyDict_New();
+        PyDict_SetItemString(py_kwargs, "bytes", py_key_bytes);
+        
+        // Create a UUID object using UUID(bytes=key_bytes)
+        py_key_stream_id = PyObject_Call(py_uuid_class, PyTuple_New(0), py_kwargs);
+        
+        // Clean up
+        Py_DECREF(py_uuid_module);
+        Py_DECREF(py_uuid_class);
+        Py_DECREF(py_key_bytes);
+        Py_DECREF(py_kwargs);
+        
+        if (!py_key_stream_id) {
+            PyErr_Print();
+            if (status) {
+                *status = QKD_STATUS_NO_CONNECTION;
+            }
+            return QKD_STATUS_NO_CONNECTION;
+        }
+        
+        QKD_DBG_INFO("Passing Alice's UUID to Python client (Bob case - join session)");
+    }
+
     // Call open_connect() method on the Python client
     PyObject *py_open_connect_method = PyObject_GetAttrString(py_qkd_client_instance, "open_connect");
     if (!py_open_connect_method || !PyCallable_Check(py_open_connect_method)) {
         PyErr_Print();
         Py_XDECREF(py_open_connect_method);
+        Py_DECREF(py_key_stream_id);
         if (status) {
             *status = QKD_STATUS_NO_CONNECTION;
         }
         return QKD_STATUS_NO_CONNECTION;
     }
 
-    py_args = PyTuple_New(2);
+    // Python signature: open_connect(self, source_uri, dest_uri, qos=None, key_stream_id=None)
+    py_args = PyTuple_New(4);  // ← Changed from 2 to 4!
     PyTuple_SetItem(py_args, 0, PyUnicode_FromString(source));
     PyTuple_SetItem(py_args, 1, PyUnicode_FromString(destination));
+    PyTuple_SetItem(py_args, 2, Py_None);
+    Py_INCREF(Py_None);
+    PyTuple_SetItem(py_args, 3, py_key_stream_id);
+
+    QKD_DBG_INFO("Calling Python open_connect with 4 parameters (source, dest, qos=None, key_stream_id)");
 
     PyObject *py_open_connect_result = PyObject_CallObject(py_open_connect_method, py_args);
     Py_DECREF(py_args);
@@ -290,7 +369,7 @@ static uint32_t python_client_open_connect(const char *source, const char *desti
     
     if (tuple_size >= 3) {
         PyObject *py_returned_qos = PyTuple_GetItem(py_open_connect_result, 0);
-        PyObject *py_key_stream_id = PyTuple_GetItem(py_open_connect_result, 1);
+        PyObject *py_key_stream_id_result = PyTuple_GetItem(py_open_connect_result, 1);
         PyObject *py_status_obj = PyTuple_GetItem(py_open_connect_result, 2);
         
         // Extract status value
@@ -308,14 +387,22 @@ static uint32_t python_client_open_connect(const char *source, const char *desti
         // Process key_stream_id if status is success or QoS_NOT_MET
         if ((status_value == QKD_STATUS_SUCCESS || status_value == QKD_STATUS_QOS_NOT_MET || 
              status_value == QKD_STATUS_PEER_NOT_CONNECTED) && 
-            py_key_stream_id && py_key_stream_id != Py_None) {
+            py_key_stream_id_result && py_key_stream_id_result != Py_None) {
             
             // Get the bytes attribute of the UUID
-            PyObject *py_bytes = PyObject_GetAttrString(py_key_stream_id, "bytes");
+            PyObject *py_bytes = PyObject_GetAttrString(py_key_stream_id_result, "bytes");
             if (py_bytes && PyBytes_Check(py_bytes)) {
                 // Copy the UUID bytes to the output buffer
                 memcpy(key_stream_id, PyBytes_AsString(py_bytes), QKD_KSID_SIZE);
                 QKD_DBG_INFO("Key stream ID extracted successfully");
+                
+                // Debug: Print the key_stream_id we're returning
+                QKD_DBG_INFO("C wrapper returning key_stream_id:");
+                for (int i = 0; i < QKD_KSID_SIZE; i++) {
+                    fprintf(stderr, "%02x ", key_stream_id[i]);
+                }
+                fprintf(stderr, "\n");
+                
                 Py_DECREF(py_bytes);
             } else {
                 PyErr_Clear();
