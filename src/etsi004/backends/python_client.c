@@ -545,9 +545,8 @@ static uint32_t python_client_close(const unsigned char *key_stream_id, uint32_t
     }
     Py_DECREF(py_close_result);
 
-    // Cleanup Python resources
-    finalize_python();
-
+    QKD_DBG_INFO("Python close method completed with status: %u", status_value);
+    
     if (status) {
         *status = status_value;
     }
