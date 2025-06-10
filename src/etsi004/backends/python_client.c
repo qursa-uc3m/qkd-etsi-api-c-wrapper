@@ -324,7 +324,12 @@ static uint32_t python_client_open_connect(const char *source, const char *desti
             return QKD_STATUS_NO_CONNECTION;
         }
         
-        QKD_DBG_INFO("Passing Alice's UUID to Python client (Bob case - join session)");
+        PyObject *py_uuid_str = PyObject_Str(py_key_stream_id);
+        if (py_uuid_str) {
+            const char *uuid_str = PyUnicode_AsUTF8(py_uuid_str);
+            QKD_DBG_INFO("Passing Alice's UUID to Python client (Bob case): %s", uuid_str);
+            Py_DECREF(py_uuid_str);
+        }
     }
 
     // Call open_connect() method on the Python client
@@ -340,7 +345,7 @@ static uint32_t python_client_open_connect(const char *source, const char *desti
     }
 
     // Python signature: open_connect(self, source_uri, dest_uri, qos=None, key_stream_id=None)
-    py_args = PyTuple_New(4);  // ← Changed from 2 to 4!
+    py_args = PyTuple_New(4);
     PyTuple_SetItem(py_args, 0, PyUnicode_FromString(source));
     PyTuple_SetItem(py_args, 1, PyUnicode_FromString(destination));
     PyTuple_SetItem(py_args, 2, Py_None);
@@ -406,18 +411,26 @@ static uint32_t python_client_open_connect(const char *source, const char *desti
                 Py_DECREF(py_bytes);
             } else {
                 PyErr_Clear();
-                memset(key_stream_id, 0, QKD_KSID_SIZE);  // Set to zeros if no valid UUID
-                QKD_DBG_ERR("Failed to extract key stream ID bytes");
+
+                QKD_DBG_ERR("Failed to extract key stream ID bytes from server response");
+                
+                if (is_null_uuid) {
+                    memset(key_stream_id, 0, QKD_KSID_SIZE);
+                }
             }
         } else {
             // No valid key stream ID or status not successful
-            memset(key_stream_id, 0, QKD_KSID_SIZE);
+            if (is_null_uuid) {
+                memset(key_stream_id, 0, QKD_KSID_SIZE);
+            }
             QKD_DBG_INFO("Key stream ID not available or status not successful");
         }
     } else {
         // Tuple doesn't have enough elements
         QKD_DBG_ERR("Python open_connect returned tuple with insufficient elements");
-        memset(key_stream_id, 0, QKD_KSID_SIZE);
+        if (is_null_uuid) {
+            memset(key_stream_id, 0, QKD_KSID_SIZE);
+        }
     }
 
     PyObject *py_updated_qos = PyObject_GetAttrString(py_qkd_client_instance, "qos");
