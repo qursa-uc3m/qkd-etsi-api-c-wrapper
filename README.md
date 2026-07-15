@@ -46,10 +46,22 @@ The build system supports the following configuration parameters:
 
 ### Backend Selection
 
-- `QKD_BACKEND`: Select QKD backend (simulated/cerberis_xgr/qukaydee). Default: simulated
+- `QKD_BACKEND`: Select QKD backend (simulated/cerberis_xgr/qukaydee/python_client). Default: simulated
   - simulated: Available for ETSI 004 and ETSI 014
   - cerberis_xgr: Available for ETSI 014
   - qukaydee: Available for ETSI 014
+  - python_client: Available for ETSI 004
+
+The ETSI 004 and ETSI 014 specifications both define a C function named
+`GET_KEY`, but with incompatible signatures. Consequently, a build with both
+APIs enabled produces two libraries:
+
+- `libqkd-etsi004-api-c-wrapper`
+- `libqkd-etsi014-api-c-wrapper`
+
+When only one API is enabled, the historical
+`libqkd-etsi-api-c-wrapper` library name is retained for backwards
+compatibility.
 
 ### Cerberis XGR Configuration
 
