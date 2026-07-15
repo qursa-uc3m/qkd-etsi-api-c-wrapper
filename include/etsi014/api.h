@@ -106,4 +106,11 @@ uint32_t GET_KEY_WITH_IDS(const char *kme_hostname, const char *master_sae_id,
                           qkd_key_ids_t *key_ids,
                           qkd_key_container_t *container);
 
+/*
+ * Release strings and key arrays allocated by the wrapper. Opaque extension
+ * objects remain owned by the caller or the backend that created them.
+ */
+void qkd_status_free(qkd_status_t *status);
+void qkd_key_container_free(qkd_key_container_t *container);
+
 #endif /* QKD_ETSI014_API_H */

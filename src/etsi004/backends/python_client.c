@@ -10,12 +10,13 @@
  * src/etsi004/backends/python_client.c
  */
 
-#include "etsi004/backends/python_client.h"
-#include "debug.h"
-#include "qkd_etsi_api.h"
 #include <Python.h>
 #include <stdio.h>
 #include <string.h>
+
+#include "debug.h"
+#include "etsi004/backends/python_client.h"
+#include "qkd_etsi_api.h"
 
 // Python module and client instance
 static PyObject *py_qkd_client_module = NULL;
@@ -27,6 +28,8 @@ static bool owns_python_interpreter = false;
 static bool initialize_python(void);
 static PyObject *convert_qos_to_python_dict(struct qkd_qos_s *qos);
 static bool convert_python_to_qos(PyObject *py_qos, struct qkd_qos_s *qos);
+static PyObject *uuid_from_bytes(const unsigned char *value);
+static bool python_to_uint32(PyObject *value, uint32_t *result);
 
 // Backend implementation functions
 static uint32_t python_client_open_connect(const char *source,
@@ -126,6 +129,56 @@ static bool initialize_python(void) {
     return true;
 }
 
+static PyObject *uuid_from_bytes(const unsigned char *value) {
+    PyObject *uuid_module = PyImport_ImportModule("uuid");
+    PyObject *uuid_class = NULL;
+    PyObject *uuid_bytes = NULL;
+    PyObject *kwargs = NULL;
+    PyObject *args = NULL;
+    PyObject *uuid_value = NULL;
+
+    if (!uuid_module)
+        goto cleanup;
+    uuid_class = PyObject_GetAttrString(uuid_module, "UUID");
+    uuid_bytes = PyBytes_FromStringAndSize((const char *)value, QKD_KSID_SIZE);
+    kwargs = PyDict_New();
+    args = PyTuple_New(0);
+    if (!uuid_class || !PyCallable_Check(uuid_class) || !uuid_bytes ||
+        !kwargs || !args ||
+        PyDict_SetItemString(kwargs, "bytes", uuid_bytes) != 0)
+        goto cleanup;
+
+    uuid_value = PyObject_Call(uuid_class, args, kwargs);
+
+cleanup:
+    Py_XDECREF(args);
+    Py_XDECREF(kwargs);
+    Py_XDECREF(uuid_bytes);
+    Py_XDECREF(uuid_class);
+    Py_XDECREF(uuid_module);
+    return uuid_value;
+}
+
+static bool python_to_uint32(PyObject *value, uint32_t *result) {
+    if (!value || !PyLong_Check(value))
+        return false;
+
+    unsigned long converted = PyLong_AsUnsignedLong(value);
+    if (PyErr_Occurred() || converted > UINT32_MAX) {
+        PyErr_Clear();
+        return false;
+    }
+    *result = (uint32_t)converted;
+    return true;
+}
+
+static bool update_qos_integer(PyObject *py_qos, const char *name,
+                               uint32_t *field) {
+    PyObject *value = PyDict_GetItemString(py_qos, name);
+
+    return !value || python_to_uint32(value, field);
+}
+
 // Convert C QoS structure to Python dictionary
 static bool add_dict_item(PyObject *dict, const char *name, PyObject *value) {
     if (!value)
@@ -142,7 +195,10 @@ static PyObject *convert_qos_to_python_dict(struct qkd_qos_s *qos) {
         return NULL;
     }
 
-    if (!add_dict_item(py_qos, "Key_chunk_size",
+    const char *mimetype_end =
+        memchr(qos->Metadata_mimetype, '\0', sizeof(qos->Metadata_mimetype));
+    if (!mimetype_end ||
+        !add_dict_item(py_qos, "Key_chunk_size",
                        PyLong_FromUnsignedLong(qos->Key_chunk_size)) ||
         !add_dict_item(py_qos, "Max_bps",
                        PyLong_FromUnsignedLong(qos->Max_bps)) ||
@@ -155,8 +211,11 @@ static PyObject *convert_qos_to_python_dict(struct qkd_qos_s *qos) {
         !add_dict_item(py_qos, "Timeout",
                        PyLong_FromUnsignedLong(qos->Timeout)) ||
         !add_dict_item(py_qos, "TTL", PyLong_FromUnsignedLong(qos->TTL)) ||
-        !add_dict_item(py_qos, "Metadata_mimetype",
-                       PyUnicode_FromString(qos->Metadata_mimetype))) {
+        !add_dict_item(
+            py_qos, "Metadata_mimetype",
+            PyUnicode_FromStringAndSize(
+                qos->Metadata_mimetype,
+                (Py_ssize_t)(mimetype_end - qos->Metadata_mimetype)))) {
         Py_DECREF(py_qos);
         return NULL;
     }
@@ -166,53 +225,26 @@ static PyObject *convert_qos_to_python_dict(struct qkd_qos_s *qos) {
 
 // Convert Python QoS dictionary to C structure
 static bool convert_python_to_qos(PyObject *py_qos, struct qkd_qos_s *qos) {
-    PyObject *value;
+    if (!PyDict_Check(py_qos) ||
+        !update_qos_integer(py_qos, "Key_chunk_size", &qos->Key_chunk_size) ||
+        !update_qos_integer(py_qos, "Max_bps", &qos->Max_bps) ||
+        !update_qos_integer(py_qos, "Min_bps", &qos->Min_bps) ||
+        !update_qos_integer(py_qos, "Jitter", &qos->Jitter) ||
+        !update_qos_integer(py_qos, "Priority", &qos->Priority) ||
+        !update_qos_integer(py_qos, "Timeout", &qos->Timeout) ||
+        !update_qos_integer(py_qos, "TTL", &qos->TTL))
+        return false;
 
-    // Extract each field from the Python dictionary and set it in the C
-    // structure
-    value = PyDict_GetItemString(py_qos, "Key_chunk_size");
-    if (value && PyLong_Check(value)) {
-        qos->Key_chunk_size = (uint32_t)PyLong_AsLong(value);
-    }
-
-    value = PyDict_GetItemString(py_qos, "Max_bps");
-    if (value && PyLong_Check(value)) {
-        qos->Max_bps = (uint32_t)PyLong_AsLong(value);
-    }
-
-    value = PyDict_GetItemString(py_qos, "Min_bps");
-    if (value && PyLong_Check(value)) {
-        qos->Min_bps = (uint32_t)PyLong_AsLong(value);
-    }
-
-    value = PyDict_GetItemString(py_qos, "Jitter");
-    if (value && PyLong_Check(value)) {
-        qos->Jitter = (uint32_t)PyLong_AsLong(value);
-    }
-
-    value = PyDict_GetItemString(py_qos, "Priority");
-    if (value && PyLong_Check(value)) {
-        qos->Priority = (uint32_t)PyLong_AsLong(value);
-    }
-
-    value = PyDict_GetItemString(py_qos, "Timeout");
-    if (value && PyLong_Check(value)) {
-        qos->Timeout = (uint32_t)PyLong_AsLong(value);
-    }
-
-    value = PyDict_GetItemString(py_qos, "TTL");
-    if (value && PyLong_Check(value)) {
-        qos->TTL = (uint32_t)PyLong_AsLong(value);
-    }
-
-    value = PyDict_GetItemString(py_qos, "Metadata_mimetype");
+    PyObject *value = PyDict_GetItemString(py_qos, "Metadata_mimetype");
     if (value && PyUnicode_Check(value)) {
         const char *str = PyUnicode_AsUTF8(value);
-        if (str) {
-            strncpy(qos->Metadata_mimetype, str,
-                    sizeof(qos->Metadata_mimetype) - 1);
-            qos->Metadata_mimetype[sizeof(qos->Metadata_mimetype) - 1] = '\0';
-        }
+        if (!str)
+            return false;
+        strncpy(qos->Metadata_mimetype, str,
+                sizeof(qos->Metadata_mimetype) - 1);
+        qos->Metadata_mimetype[sizeof(qos->Metadata_mimetype) - 1] = '\0';
+    } else if (value) {
+        return false;
     }
 
     return true;
@@ -257,10 +289,20 @@ static uint32_t python_client_open_connect(const char *source,
 
     // Extract server host and port from the destination URI
     // Assuming format: "server://hostname:port"
+    if (strncmp(destination, "server://", sizeof("server://") - 1U) != 0) {
+        QKD_DBG_ERR("Invalid destination URI format: %s", destination);
+        *status = QKD_STATUS_NO_CONNECTION;
+        return QKD_STATUS_NO_CONNECTION;
+    }
     char server_host[256] = {0};
     int server_port = 25575; // Default port
-    if (sscanf(destination, "server://%255[^:]:%d", server_host, &server_port) <
-        1) {
+    char trailing_character;
+    int parsed = sscanf(destination, "server://%255[^:]:%d%c", server_host,
+                        &server_port, &trailing_character);
+    const char *destination_address = destination + sizeof("server://") - 1U;
+    bool has_port = strchr(destination_address, ':') != NULL;
+    if (parsed < 1 || parsed > 2 || (has_port && parsed != 2) ||
+        server_port <= 0 || server_port > 65535) {
         QKD_DBG_ERR("Invalid destination URI format: %s", destination);
         if (status) {
             *status = QKD_STATUS_NO_CONNECTION;
@@ -280,9 +322,19 @@ static uint32_t python_client_open_connect(const char *source,
         return QKD_STATUS_NO_CONNECTION;
     }
 
-    PyObject *py_args = PyTuple_New(2);
-    PyTuple_SetItem(py_args, 0, PyUnicode_FromString(server_host));
-    PyTuple_SetItem(py_args, 1, PyLong_FromLong(server_port));
+    PyObject *py_host = PyUnicode_FromString(server_host);
+    PyObject *py_port = PyLong_FromLong(server_port);
+    PyObject *py_args = NULL;
+    if (py_host && py_port)
+        py_args = PyTuple_Pack(2, py_host, py_port);
+    Py_XDECREF(py_host);
+    Py_XDECREF(py_port);
+    if (!py_args) {
+        PyErr_Print();
+        Py_DECREF(py_connect_method);
+        *status = QKD_STATUS_NO_CONNECTION;
+        return QKD_STATUS_NO_CONNECTION;
+    }
 
     PyObject *py_connect_result =
         PyObject_CallObject(py_connect_method, py_args);
@@ -317,45 +369,7 @@ static uint32_t python_client_open_connect(const char *source,
         QKD_DBG_INFO(
             "Passing None to Python client (Alice case - new session)");
     } else {
-        // Bob case: convert Alice's KSID to Python UUID
-        PyObject *py_uuid_module = PyImport_ImportModule("uuid");
-        if (!py_uuid_module) {
-            PyErr_Print();
-            if (status) {
-                *status = QKD_STATUS_NO_CONNECTION;
-            }
-            return QKD_STATUS_NO_CONNECTION;
-        }
-
-        PyObject *py_uuid_class =
-            PyObject_GetAttrString(py_uuid_module, "UUID");
-        if (!py_uuid_class) {
-            Py_DECREF(py_uuid_module);
-            PyErr_Print();
-            if (status) {
-                *status = QKD_STATUS_NO_CONNECTION;
-            }
-            return QKD_STATUS_NO_CONNECTION;
-        }
-
-        // Create a bytes object from the key_stream_id
-        PyObject *py_key_bytes = PyBytes_FromStringAndSize(
-            (const char *)key_stream_id, QKD_KSID_SIZE);
-
-        // Create keyword arguments dictionary for UUID constructor
-        PyObject *py_kwargs = PyDict_New();
-        PyDict_SetItemString(py_kwargs, "bytes", py_key_bytes);
-
-        // Create a UUID object using UUID(bytes=key_bytes)
-        PyObject *empty_args = PyTuple_New(0);
-        py_key_stream_id = PyObject_Call(py_uuid_class, empty_args, py_kwargs);
-
-        // Clean up
-        Py_DECREF(py_uuid_module);
-        Py_DECREF(py_uuid_class);
-        Py_DECREF(py_key_bytes);
-        Py_DECREF(py_kwargs);
-        Py_XDECREF(empty_args);
+        py_key_stream_id = uuid_from_bytes(key_stream_id);
 
         if (!py_key_stream_id) {
             PyErr_Print();
@@ -367,8 +381,12 @@ static uint32_t python_client_open_connect(const char *source,
 
         PyObject *py_uuid_str = PyObject_Str(py_key_stream_id);
         if (py_uuid_str) {
-            QKD_DBG_INFO("Passing Alice's UUID to Python client (Bob case): %s",
-                         PyUnicode_AsUTF8(py_uuid_str));
+            const char *uuid_string = PyUnicode_AsUTF8(py_uuid_str);
+            if (uuid_string) {
+                QKD_DBG_INFO(
+                    "Passing Alice's UUID to Python client (Bob case): %s",
+                    uuid_string);
+            }
             Py_DECREF(py_uuid_str);
         }
     }
@@ -388,12 +406,21 @@ static uint32_t python_client_open_connect(const char *source,
 
     // Python signature: open_connect(self, source_uri, dest_uri, qos=None,
     // key_stream_id=None)
-    py_args = PyTuple_New(4);
-    PyTuple_SetItem(py_args, 0, PyUnicode_FromString(source));
-    PyTuple_SetItem(py_args, 1, PyUnicode_FromString(destination));
-    PyTuple_SetItem(py_args, 2, Py_None);
-    Py_INCREF(Py_None);
-    PyTuple_SetItem(py_args, 3, py_key_stream_id);
+    PyObject *py_source = PyUnicode_FromString(source);
+    PyObject *py_destination = PyUnicode_FromString(destination);
+    py_args = NULL;
+    if (py_source && py_destination)
+        py_args = PyTuple_Pack(4, py_source, py_destination, Py_None,
+                               py_key_stream_id);
+    Py_XDECREF(py_source);
+    Py_XDECREF(py_destination);
+    Py_DECREF(py_key_stream_id);
+    if (!py_args) {
+        PyErr_Print();
+        Py_DECREF(py_open_connect_method);
+        *status = QKD_STATUS_NO_CONNECTION;
+        return QKD_STATUS_NO_CONNECTION;
+    }
 
     QKD_DBG_INFO("Calling Python open_connect with 4 parameters (source, dest, "
                  "qos=None, key_stream_id)");
@@ -424,15 +451,16 @@ static uint32_t python_client_open_connect(const char *source,
         PyObject *py_status_obj = PyTuple_GetItem(py_open_connect_result, 2);
 
         // Extract status value
-        if (py_status_obj && PyLong_Check(py_status_obj)) {
-            status_value = (uint32_t)PyLong_AsLong(py_status_obj);
-        }
+        python_to_uint32(py_status_obj, &status_value);
         QKD_DBG_INFO("Status value extracted from tuple: %u", status_value);
 
         // Update QoS from returned values
         if (py_returned_qos && PyDict_Check(py_returned_qos)) {
-            convert_python_to_qos(py_returned_qos, qos);
-            QKD_DBG_INFO("QoS updated from returned values");
+            if (!convert_python_to_qos(py_returned_qos, qos))
+                status_value = QKD_STATUS_NO_CONNECTION;
+            else {
+                QKD_DBG_INFO("QoS updated from returned values");
+            }
         }
 
         // Process key_stream_id if status is success or QoS_NOT_MET
@@ -453,6 +481,7 @@ static uint32_t python_client_open_connect(const char *source,
 
                 Py_DECREF(py_bytes);
             } else {
+                Py_XDECREF(py_bytes);
                 PyErr_Clear();
 
                 QKD_DBG_ERR("Failed to extract key stream ID bytes from server "
@@ -482,8 +511,11 @@ static uint32_t python_client_open_connect(const char *source,
     PyObject *py_updated_qos =
         PyObject_GetAttrString(py_qkd_client_instance, "qos");
     if (py_updated_qos && PyDict_Check(py_updated_qos)) {
-        convert_python_to_qos(py_updated_qos, qos);
-        QKD_DBG_INFO("QoS updated from client instance");
+        if (!convert_python_to_qos(py_updated_qos, qos))
+            status_value = QKD_STATUS_NO_CONNECTION;
+        else {
+            QKD_DBG_INFO("QoS updated from client instance");
+        }
         Py_DECREF(py_updated_qos);
     }
 
@@ -528,47 +560,7 @@ static uint32_t python_client_get_key(const unsigned char *key_stream_id,
         return QKD_STATUS_NO_CONNECTION;
     }
 
-    // Import uuid module
-    PyObject *py_uuid_module = PyImport_ImportModule("uuid");
-    if (!py_uuid_module) {
-        PyErr_Print();
-        Py_XDECREF(py_get_key_method);
-        if (status) {
-            *status = QKD_STATUS_NO_CONNECTION;
-        }
-        return QKD_STATUS_NO_CONNECTION;
-    }
-
-    // Get the UUID class
-    PyObject *py_uuid_class = PyObject_GetAttrString(py_uuid_module, "UUID");
-    if (!py_uuid_class) {
-        Py_DECREF(py_uuid_module);
-        Py_XDECREF(py_get_key_method);
-        PyErr_Print();
-        if (status) {
-            *status = QKD_STATUS_NO_CONNECTION;
-        }
-        return QKD_STATUS_NO_CONNECTION;
-    }
-
-    // Create a bytes object from the binary key_id
-    PyObject *py_key_bytes =
-        PyBytes_FromStringAndSize((const char *)key_stream_id, 16);
-
-    // Create keyword arguments dictionary for UUID constructor
-    PyObject *py_kwargs = PyDict_New();
-    PyDict_SetItemString(py_kwargs, "bytes", py_key_bytes);
-
-    // Create a UUID object using UUID(bytes=key_bytes)
-    PyObject *empty_args = PyTuple_New(0);
-    PyObject *py_uuid = PyObject_Call(py_uuid_class, empty_args, py_kwargs);
-
-    // Clean up UUID-related objects we don't need anymore
-    Py_DECREF(py_uuid_module);
-    Py_DECREF(py_uuid_class);
-    Py_DECREF(py_key_bytes);
-    Py_DECREF(py_kwargs);
-    Py_XDECREF(empty_args);
+    PyObject *py_uuid = uuid_from_bytes(key_stream_id);
 
     if (!py_uuid) {
         PyErr_Print();
@@ -584,31 +576,38 @@ static uint32_t python_client_get_key(const unsigned char *key_stream_id,
         "{\"format\":\"json\",\"version\":\"1.0\",\"source\":\"qkd_client\"}";
     size_t json_len = strlen(json);
 
-    if (metadata && metadata->Metadata_buffer &&
-        json_len < metadata->Metadata_size) {
-        // Copy it to the metadata buffer
-        memcpy(metadata->Metadata_buffer, json, json_len);
-        metadata->Metadata_buffer[json_len] = '\0';
+    if (metadata && metadata->Metadata_size > 0 &&
+        (!metadata->Metadata_buffer || json_len >= metadata->Metadata_size)) {
+        metadata->Metadata_size = (uint32_t)json_len + 1U;
+        Py_DECREF(py_uuid);
+        Py_DECREF(py_get_key_method);
+        *status = QKD_STATUS_METADATA_SIZE_INSUFFICIENT;
+        return QKD_STATUS_METADATA_SIZE_INSUFFICIENT;
     }
 
-    // IMPORTANT: Pass the metadata as BYTES, not a dictionary
-    // The client's get_key() method expects a bytes-like object, not a
-    // dictionary
+    // The Python client expects metadata request information as bytes. Pass
+    // only initialized bytes, never the full capacity of the caller's buffer.
     const char *metadata_data = "";
     Py_ssize_t metadata_size = 0;
-    if (metadata && metadata->Metadata_buffer) {
-        metadata_data = (const char *)metadata->Metadata_buffer;
-        metadata_size = metadata->Metadata_size;
+    if (metadata && metadata->Metadata_size > 0) {
+        metadata_data = json;
+        metadata_size = (Py_ssize_t)json_len;
     }
     PyObject *py_metadata_bytes =
         PyBytes_FromStringAndSize(metadata_data, metadata_size);
-
-    // Now create a tuple with 3 arguments: UUID object, index, and metadata
-    // bytes
-    PyObject *py_args = PyTuple_New(3);
-    PyTuple_SetItem(py_args, 0, py_uuid); // UUID object
-    PyTuple_SetItem(py_args, 1, PyLong_FromLong(*index));
-    PyTuple_SetItem(py_args, 2, py_metadata_bytes); // Bytes object
+    PyObject *py_index = PyLong_FromUnsignedLong(*index);
+    PyObject *py_args = NULL;
+    if (py_metadata_bytes && py_index)
+        py_args = PyTuple_Pack(3, py_uuid, py_index, py_metadata_bytes);
+    Py_DECREF(py_uuid);
+    Py_XDECREF(py_index);
+    Py_XDECREF(py_metadata_bytes);
+    if (!py_args) {
+        PyErr_Print();
+        Py_DECREF(py_get_key_method);
+        *status = QKD_STATUS_NO_CONNECTION;
+        return QKD_STATUS_NO_CONNECTION;
+    }
 
     PyObject *py_get_key_result =
         PyObject_CallObject(py_get_key_method, py_args);
@@ -633,41 +632,43 @@ static uint32_t python_client_get_key(const unsigned char *key_stream_id,
 
     // Extract status, key_material, and metadata from the result tuple
     PyObject *py_status = PyTuple_GetItem(py_get_key_result, 0);
-    uint32_t status_value = (uint32_t)PyLong_AsLong(py_status);
+    uint32_t status_value = QKD_STATUS_NO_CONNECTION;
+    python_to_uint32(py_status, &status_value);
 
     if (status_value == QKD_STATUS_SUCCESS) {
-        // Get key material from the result
         PyObject *py_key_material = PyTuple_GetItem(py_get_key_result, 1);
-        if (py_key_material && PyBytes_Check(py_key_material)) {
-            char *key_data = PyBytes_AsString(py_key_material);
-            Py_ssize_t key_len = PyBytes_Size(py_key_material);
+        if (!py_key_material || !PyBytes_Check(py_key_material) ||
+            PyBytes_Size(py_key_material) != QKD_KEY_SIZE)
+            status_value = QKD_STATUS_INSUFFICIENT_KEY;
 
-            if (key_len == QKD_KEY_SIZE)
-                memcpy(key_buffer, key_data, QKD_KEY_SIZE);
-            else
-                status_value = QKD_STATUS_INSUFFICIENT_KEY;
-        }
-
-        // Get metadata from the result
         PyObject *py_metadata = PyTuple_GetItem(py_get_key_result, 2);
         if (status_value == QKD_STATUS_SUCCESS && metadata &&
-            metadata->Metadata_buffer && py_metadata &&
-            PyUnicode_Check(py_metadata)) {
-            const char *metadata_str = PyUnicode_AsUTF8(py_metadata);
-            if (metadata_str) {
-                size_t metadata_len = strlen(metadata_str);
-
-                // Check if metadata buffer is large enough
-                if (metadata_len < metadata->Metadata_size) {
-                    memcpy(metadata->Metadata_buffer, metadata_str,
-                           metadata_len);
-                    metadata->Metadata_buffer[metadata_len] = '\0';
+            metadata->Metadata_size > 0) {
+            if (!py_metadata || !PyUnicode_Check(py_metadata)) {
+                status_value = QKD_STATUS_NO_CONNECTION;
+            } else {
+                const char *metadata_str = PyUnicode_AsUTF8(py_metadata);
+                if (!metadata_str) {
+                    PyErr_Clear();
+                    status_value = QKD_STATUS_NO_CONNECTION;
                 } else {
-                    // Metadata buffer is too small
-                    status_value = QKD_STATUS_METADATA_SIZE_INSUFFICIENT;
+                    size_t metadata_len = strlen(metadata_str);
+
+                    if (!metadata->Metadata_buffer ||
+                        metadata_len >= metadata->Metadata_size) {
+                        metadata->Metadata_size = (uint32_t)metadata_len + 1U;
+                        status_value = QKD_STATUS_METADATA_SIZE_INSUFFICIENT;
+                    } else {
+                        memcpy(metadata->Metadata_buffer, metadata_str,
+                               metadata_len + 1U);
+                        metadata->Metadata_size = (uint32_t)metadata_len;
+                    }
                 }
             }
         }
+
+        if (status_value == QKD_STATUS_SUCCESS)
+            memcpy(key_buffer, PyBytes_AsString(py_key_material), QKD_KEY_SIZE);
     }
 
     Py_DECREF(py_get_key_result);
@@ -715,9 +716,9 @@ static uint32_t python_client_close(const unsigned char *key_stream_id,
     }
 
     uint32_t status_value = QKD_STATUS_SUCCESS;
-    if (PyLong_Check(py_close_result)) {
-        status_value = (uint32_t)PyLong_AsLong(py_close_result);
-    }
+    if (PyLong_Check(py_close_result) &&
+        !python_to_uint32(py_close_result, &status_value))
+        status_value = QKD_STATUS_NO_CONNECTION;
     Py_DECREF(py_close_result);
 
     QKD_DBG_INFO("Python close method completed with status: %u", status_value);

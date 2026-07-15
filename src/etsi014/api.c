@@ -14,6 +14,8 @@
 
 #include "etsi014/api.h"
 #include "debug.h"
+#include <stdlib.h>
+#include <string.h>
 
 #ifdef QKD_USE_SIMULATED
 #include "etsi014/backends/simulated.h"
@@ -81,4 +83,27 @@ uint32_t GET_KEY_WITH_IDS(const char *kme_hostname, const char *master_sae_id,
 
     return active_backend->get_key_with_ids(kme_hostname, master_sae_id,
                                             key_ids, container);
+}
+
+void qkd_status_free(qkd_status_t *status) {
+    if (!status)
+        return;
+
+    free(status->source_KME_ID);
+    free(status->target_KME_ID);
+    free(status->master_SAE_ID);
+    free(status->slave_SAE_ID);
+    memset(status, 0, sizeof(*status));
+}
+
+void qkd_key_container_free(qkd_key_container_t *container) {
+    if (!container)
+        return;
+
+    for (int32_t i = 0; container->keys && i < container->key_count; i++) {
+        free(container->keys[i].key_ID);
+        free(container->keys[i].key);
+    }
+    free(container->keys);
+    memset(container, 0, sizeof(*container));
 }

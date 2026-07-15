@@ -40,18 +40,6 @@ struct stored_key {
 static struct stored_key key_store[MAX_KEYS];
 static int32_t stored_keys;
 
-static void cleanup_container(qkd_key_container_t *container) {
-    if (!container || !container->keys)
-        return;
-
-    for (int32_t i = 0; i < container->key_count; i++) {
-        free(container->keys[i].key_ID);
-        free(container->keys[i].key);
-    }
-    free(container->keys);
-    memset(container, 0, sizeof(*container));
-}
-
 static char *base64_encode(const unsigned char *input, size_t length) {
     if (length > INT_MAX)
         return NULL;
@@ -143,12 +131,12 @@ static uint32_t sim_get_status(const char *kme_hostname,
     }
 
     status->key_size = KEY_SIZE_BITS;
-    status->stored_key_count = stored_keys;
+    status->stored_key_count = MAX_KEYS - stored_keys;
     status->max_key_count = MAX_KEYS;
     status->max_key_per_request = MAX_KEYS;
     status->max_key_size = KEY_SIZE_BITS;
     status->min_key_size = KEY_SIZE_BITS;
-    status->max_SAE_ID_count = 1;
+    status->max_SAE_ID_count = 0;
     return QKD_STATUS_OK;
 }
 
@@ -157,14 +145,19 @@ static uint32_t sim_get_key(const char *kme_hostname, const char *slave_sae_id,
                             qkd_key_container_t *container) {
     if (!kme_hostname || !slave_sae_id || !container)
         return QKD_STATUS_BAD_REQUEST;
-    if (request && (request->number < 0 || request->size < 0))
-        return QKD_STATUS_BAD_REQUEST;
+    if (request) {
+        if (request->number < 0 || request->size < 0 ||
+            request->additional_SAE_count < 0 ||
+            request->additional_SAE_count > 0 || request->extension_mandatory)
+            return QKD_STATUS_BAD_REQUEST;
+    }
 
     int32_t number = request && request->number > 0 ? request->number : 1;
     int32_t size = request && request->size > 0 ? request->size : KEY_SIZE_BITS;
-    if (number > MAX_KEYS || size != KEY_SIZE_BITS ||
-        number > MAX_KEYS - stored_keys)
+    if (number > MAX_KEYS || size != KEY_SIZE_BITS)
         return QKD_STATUS_BAD_REQUEST;
+    if (number > MAX_KEYS - stored_keys)
+        return QKD_STATUS_SERVER_ERROR;
 
     memset(container, 0, sizeof(*container));
     container->keys = calloc((size_t)number, sizeof(*container->keys));
@@ -180,7 +173,7 @@ static uint32_t sim_get_key(const char *kme_hostname, const char *slave_sae_id,
                        sizeof(key_store[stored_indices[j]]));
                 stored_keys--;
             }
-            cleanup_container(container);
+            qkd_key_container_free(container);
             return QKD_STATUS_SERVER_ERROR;
         }
         stored_indices[i] = store_key(&container->keys[i]);
@@ -190,7 +183,7 @@ static uint32_t sim_get_key(const char *kme_hostname, const char *slave_sae_id,
                        sizeof(key_store[stored_indices[j]]));
                 stored_keys--;
             }
-            cleanup_container(container);
+            qkd_key_container_free(container);
             return QKD_STATUS_SERVER_ERROR;
         }
     }
@@ -203,11 +196,13 @@ static uint32_t sim_get_key_with_ids(const char *kme_hostname,
                                      qkd_key_container_t *container) {
     if (!kme_hostname || !master_sae_id || !key_ids || !container ||
         key_ids->key_ID_count <= 0 || key_ids->key_ID_count > MAX_KEYS ||
-        !key_ids->key_IDs)
+        !key_ids->key_IDs || key_ids->key_IDs_extension)
         return QKD_STATUS_BAD_REQUEST;
 
     int matched_indices[MAX_KEYS];
     for (int32_t i = 0; i < key_ids->key_ID_count; i++) {
+        if (key_ids->key_IDs[i].key_ID_extension)
+            return QKD_STATUS_BAD_REQUEST;
         matched_indices[i] = find_key(key_ids->key_IDs[i].key_ID);
         if (matched_indices[i] < 0)
             return QKD_STATUS_BAD_REQUEST;
@@ -229,7 +224,7 @@ static uint32_t sim_get_key_with_ids(const char *kme_hostname,
         container->keys[i].key_ID = strdup(stored->key_id);
         container->keys[i].key = strdup(stored->key_data);
         if (!container->keys[i].key_ID || !container->keys[i].key) {
-            cleanup_container(container);
+            qkd_key_container_free(container);
             return QKD_STATUS_SERVER_ERROR;
         }
     }

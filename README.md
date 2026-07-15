@@ -52,6 +52,11 @@ The build system supports the following configuration parameters:
   - qukaydee: Available for ETSI 014
   - python_client: Available for ETSI 004
 
+The `simulated` backend is intended for tests and integration development. It
+does not provide production QKD security. Its first ETSI 004 stream retains the
+historical deterministic fixture for compatibility; subsequent streams use
+random per-stream state.
+
 The ETSI 004 and ETSI 014 specifications both define a C function named
 `GET_KEY`, but with incompatible signatures. Consequently, a build with both
 APIs enabled produces two libraries:
@@ -65,19 +70,25 @@ compatibility.
 
 ### Cerberis XGR Configuration
 
-When using the QKD ETSI 014 backend, the following environment variables must be set:
-
-- `QKD_CERT_PATH`: Path to the public certificate
-- `QKD_KEY_PATH`: Path to the private key
-- `QKD_CA_CERT_PATH`: Path to the CA certificate
+The HTTPS backend uses role-specific certificate variables. Set
+`QKD_MASTER_CERT_PATH`, `QKD_MASTER_KEY_PATH`, and
+`QKD_MASTER_CA_CERT_PATH` for `GET_STATUS`/`GET_KEY`. Set the corresponding
+`QKD_SLAVE_*` variables for `GET_KEY_WITH_IDS`.
 
 Example:
 
 ```bash
-export QKD_CERT_PATH=/path/to/cert.pem
-export QKD_KEY_PATH=/path/to/key.pem
-export QKD_CA_CERT_PATH=/path/to/ca.pem
+export QKD_MASTER_CERT_PATH=/path/to/master-cert.pem
+export QKD_MASTER_KEY_PATH=/path/to/master-key.pem
+export QKD_MASTER_CA_CERT_PATH=/path/to/master-ca.pem
+
+export QKD_SLAVE_CERT_PATH=/path/to/slave-cert.pem
+export QKD_SLAVE_KEY_PATH=/path/to/slave-key.pem
+export QKD_SLAVE_CA_CERT_PATH=/path/to/slave-ca.pem
 ```
+
+ETSI 014 response strings and keys are allocated by the wrapper. Release them
+with `qkd_status_free()` and `qkd_key_container_free()`.
 
 ### Other Options
 
@@ -164,6 +175,10 @@ This Python client integration:
 - Uses the original QUBIP Python client code for ETSI-004
 - Our C wrapper imports this as a Python module through the Python C API
 - Creates a `.pth` file in your user's site-packages directory to make the module importable without environment variable changes
+
+The current Python backend owns a single Python client instance. Calls must be
+serialized by the application; concurrent calls and multiple independent
+connections are not yet supported.
 
 #### Setting up the Environment
 

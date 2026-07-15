@@ -8,6 +8,7 @@
  * - Daniel Sobral Blanco (@dasobral) - UC3M
  */
 
+#include <ctype.h>
 #include <curl/curl.h>
 #include <inttypes.h>
 #include <jansson.h>
@@ -34,25 +35,6 @@ struct memory_buffer {
     char *data;
     size_t size;
 };
-
-static void cleanup_status(qkd_status_t *status) {
-    free(status->source_KME_ID);
-    free(status->target_KME_ID);
-    free(status->master_SAE_ID);
-    free(status->slave_SAE_ID);
-    memset(status, 0, sizeof(*status));
-}
-
-static void cleanup_container(qkd_key_container_t *container) {
-    if (!container)
-        return;
-    for (int32_t i = 0; container->keys && i < container->key_count; i++) {
-        free(container->keys[i].key_ID);
-        free(container->keys[i].key);
-    }
-    free(container->keys);
-    memset(container, 0, sizeof(*container));
-}
 
 int init_cert_config(int role, etsi014_cert_config_t *config) {
     if (!config || (role != 0 && role != 1))
@@ -117,6 +99,50 @@ static char *duplicate_json_string(json_t *root, const char *name) {
     return json_is_string(field) ? strdup(json_string_value(field)) : NULL;
 }
 
+static bool is_uuid_string(const char *value) {
+    if (!value || strlen(value) != 36)
+        return false;
+
+    for (size_t i = 0; i < 36; i++) {
+        if (i == 8 || i == 13 || i == 18 || i == 23) {
+            if (value[i] != '-')
+                return false;
+        } else if (!isxdigit((unsigned char)value[i])) {
+            return false;
+        }
+    }
+    return true;
+}
+
+static bool is_base64_string(const char *value) {
+    if (!value)
+        return false;
+
+    size_t length = strlen(value);
+    if (length == 0 || length % 4U != 0)
+        return false;
+
+    size_t padding = 0;
+    if (value[length - 1U] == '=')
+        padding++;
+    if (length > 1U && value[length - 2U] == '=')
+        padding++;
+
+    for (size_t i = 0; i < length - padding; i++) {
+        unsigned char character = (unsigned char)value[i];
+        bool alphanumeric = (character >= 'A' && character <= 'Z') ||
+                            (character >= 'a' && character <= 'z') ||
+                            (character >= '0' && character <= '9');
+        if (!alphanumeric && character != '+' && character != '/')
+            return false;
+    }
+    for (size_t i = length - padding; i < length; i++) {
+        if (value[i] != '=')
+            return false;
+    }
+    return true;
+}
+
 int parse_response_to_qkd_status(const char *response, qkd_status_t *status) {
     if (!response || !status)
         return -1;
@@ -146,10 +172,16 @@ int parse_response_to_qkd_status(const char *response, qkd_status_t *status) {
     parsed.slave_SAE_ID = duplicate_json_string(root, "slave_SAE_ID");
     valid = valid && parsed.source_KME_ID && parsed.target_KME_ID &&
             parsed.master_SAE_ID && parsed.slave_SAE_ID;
+    valid = valid && parsed.key_size > 0 && parsed.stored_key_count >= 0 &&
+            parsed.max_key_count >= parsed.stored_key_count &&
+            parsed.max_key_per_request > 0 &&
+            parsed.max_key_size >= parsed.key_size && parsed.min_key_size > 0 &&
+            parsed.min_key_size <= parsed.key_size &&
+            parsed.max_SAE_ID_count >= 0;
 
     json_decref(root);
     if (!valid) {
-        cleanup_status(&parsed);
+        qkd_status_free(&parsed);
         return -1;
     }
 
@@ -190,9 +222,10 @@ int parse_response_to_qkd_keys(const char *response,
         json_t *key_data = json_array_get(keys, i);
         parsed.keys[i].key_ID = duplicate_json_string(key_data, "key_ID");
         parsed.keys[i].key = duplicate_json_string(key_data, "key");
-        if (!parsed.keys[i].key_ID || !parsed.keys[i].key) {
+        if (!is_uuid_string(parsed.keys[i].key_ID) ||
+            !is_base64_string(parsed.keys[i].key)) {
             json_decref(root);
-            cleanup_container(&parsed);
+            qkd_key_container_free(&parsed);
             return -1;
         }
     }
@@ -213,7 +246,8 @@ static char *build_post_data(const qkd_key_ids_t *key_ids,
     }
 
     for (int32_t i = 0; i < key_ids->key_ID_count; i++) {
-        if (!key_ids->key_IDs[i].key_ID) {
+        if (!key_ids->key_IDs[i].key_ID ||
+            key_ids->key_IDs[i].key_ID_extension) {
             json_decref(root);
             json_decref(ids);
             return NULL;
@@ -328,6 +362,7 @@ static char *handle_request_https(const char *url, const char *post_data,
     curl_easy_setopt(curl, CURLOPT_CAINFO, cert_config->ca_cert_path);
     curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 1L);
     curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 2L);
+    curl_easy_setopt(curl, CURLOPT_SSLVERSION, CURL_SSLVERSION_TLSv1_2);
     curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, CONNECT_TIMEOUT_SECONDS);
     curl_easy_setopt(curl, CURLOPT_TIMEOUT, REQUEST_TIMEOUT_SECONDS);
     curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_memory_callback);
@@ -369,7 +404,7 @@ static uint32_t handle_keys_response(char *response, long http_code,
 
     int parsed = parse_response_to_qkd_keys(response, container);
     free(response);
-    return parsed == 0 ? QKD_STATUS_OK : QKD_STATUS_BAD_REQUEST;
+    return parsed == 0 ? QKD_STATUS_OK : QKD_STATUS_SERVER_ERROR;
 }
 
 static uint32_t get_status(const char *kme_hostname, const char *slave_sae_id,
@@ -394,14 +429,18 @@ static uint32_t get_status(const char *kme_hostname, const char *slave_sae_id,
 
     int parsed = parse_response_to_qkd_status(response, status);
     free(response);
-    return parsed == 0 ? QKD_STATUS_OK : QKD_STATUS_BAD_REQUEST;
+    return parsed == 0 ? QKD_STATUS_OK : QKD_STATUS_SERVER_ERROR;
 }
 
 static uint32_t get_key(const char *kme_hostname, const char *slave_sae_id,
                         qkd_key_request_t *request,
                         qkd_key_container_t *container) {
-    if (request && (request->number < 0 || request->size < 0))
-        return QKD_STATUS_BAD_REQUEST;
+    if (request) {
+        if (request->number < 0 || request->size < 0 ||
+            request->additional_SAE_count < 0 ||
+            request->additional_SAE_count > 0 || request->extension_mandatory)
+            return QKD_STATUS_BAD_REQUEST;
+    }
     int32_t number = request && request->number > 0 ? request->number : 1;
     int32_t size =
         request && request->size > 0 ? request->size : DEFAULT_KEY_SIZE;
@@ -436,7 +475,7 @@ static uint32_t get_key_with_ids(const char *kme_hostname,
                                  qkd_key_ids_t *key_ids,
                                  qkd_key_container_t *container) {
     if (key_ids->key_ID_count <= 0 || key_ids->key_ID_count > MAX_KEYS ||
-        !key_ids->key_IDs)
+        !key_ids->key_IDs || key_ids->key_IDs_extension)
         return QKD_STATUS_BAD_REQUEST;
 
     char *url = build_url(kme_hostname, master_sae_id, "dec_keys");

@@ -29,9 +29,11 @@
 
 struct stream_state {
     unsigned char key_id[QKD_KSID_SIZE];
+    unsigned char key_secret[QKD_KEY_SIZE];
     struct qkd_qos_s qos;
     bool in_use;
     bool peer_connected;
+    bool uses_legacy_key;
     uint64_t creation_time;
 };
 
@@ -43,6 +45,7 @@ static struct stream_state streams[MAX_STREAMS];
 static unsigned char closed_streams[MAX_STREAMS][QKD_KSID_SIZE];
 static bool closed_stream_in_use[MAX_STREAMS];
 static size_t next_closed_stream;
+static bool legacy_stream_id_issued;
 
 static uint32_t set_status(uint32_t *status, uint32_t value) {
     if (status)
@@ -70,19 +73,33 @@ static int allocate_stream(void) {
     return -1;
 }
 
-static bool generate_stream_id(unsigned char *key_stream_id) {
-    if (find_stream(test_key_uuid) < 0) {
+static bool is_null_stream_id(const unsigned char *key_stream_id) {
+    static const unsigned char null_id[QKD_KSID_SIZE];
+
+    return memcmp(key_stream_id, null_id, sizeof(null_id)) == 0;
+}
+
+static bool was_closed(const unsigned char *key_stream_id);
+
+static bool generate_stream_id(unsigned char *key_stream_id,
+                               bool *uses_legacy_id) {
+    if (!legacy_stream_id_issued && find_stream(test_key_uuid) < 0 &&
+        !was_closed(test_key_uuid)) {
         memcpy(key_stream_id, test_key_uuid, QKD_KSID_SIZE);
+        *uses_legacy_id = true;
         return true;
     }
+    legacy_stream_id_issued = true;
 
     for (int attempts = 0; attempts < MAX_STREAMS; attempts++) {
         if (RAND_bytes(key_stream_id, QKD_KSID_SIZE) != 1)
             return false;
         key_stream_id[6] = (key_stream_id[6] & 0x0fU) | 0x40U;
         key_stream_id[8] = (key_stream_id[8] & 0x3fU) | 0x80U;
-        if (find_stream(key_stream_id) < 0)
+        if (find_stream(key_stream_id) < 0 && !was_closed(key_stream_id)) {
+            *uses_legacy_id = false;
             return true;
+        }
     }
     return false;
 }
@@ -110,9 +127,33 @@ static uint64_t get_current_time_ms(void) {
     return (uint64_t)ts.tv_sec * 1000U + (uint64_t)ts.tv_nsec / 1000000U;
 }
 
-static bool qos_is_supported(const struct qkd_qos_s *qos) {
-    return qos->Key_chunk_size == QKD_KEY_SIZE && qos->Max_bps > 0 &&
-           qos->Min_bps <= qos->Max_bps;
+static bool normalize_qos(struct qkd_qos_s *qos) {
+    static const char json_mimetype[] = "application/json";
+    bool supported = true;
+
+    if (qos->Key_chunk_size == 0)
+        qos->Key_chunk_size = QKD_KEY_SIZE;
+    else if (qos->Key_chunk_size != QKD_KEY_SIZE) {
+        qos->Key_chunk_size = QKD_KEY_SIZE;
+        supported = false;
+    }
+
+    if (qos->Max_bps == 0)
+        qos->Max_bps = 1000000;
+    if (qos->Min_bps > qos->Max_bps) {
+        qos->Min_bps = qos->Max_bps;
+        supported = false;
+    }
+
+    if (!memchr(qos->Metadata_mimetype, '\0', sizeof(qos->Metadata_mimetype)) ||
+        (qos->Metadata_mimetype[0] != '\0' &&
+         strcmp(qos->Metadata_mimetype, json_mimetype) != 0)) {
+        memset(qos->Metadata_mimetype, 0, sizeof(qos->Metadata_mimetype));
+        memcpy(qos->Metadata_mimetype, json_mimetype, sizeof(json_mimetype));
+        supported = false;
+    }
+
+    return supported;
 }
 
 static bool generate_key(const struct stream_state *stream, unsigned char *key,
@@ -124,10 +165,12 @@ static bool generate_key(const struct stream_state *stream, unsigned char *key,
     if (!ctx)
         return false;
 
-    bool digest_ok = EVP_DigestInit_ex(ctx, EVP_sha256(), NULL) == 1 &&
-                     EVP_DigestUpdate(ctx, &index, sizeof(index)) == 1;
-    if (digest_ok && memcmp(stream->key_id, test_key_uuid, QKD_KSID_SIZE) != 0)
-        digest_ok = EVP_DigestUpdate(ctx, stream->key_id, QKD_KSID_SIZE) == 1;
+    bool digest_ok = EVP_DigestInit_ex(ctx, EVP_sha256(), NULL) == 1;
+    if (digest_ok && !stream->uses_legacy_key)
+        digest_ok = EVP_DigestUpdate(ctx, stream->key_secret,
+                                     sizeof(stream->key_secret)) == 1;
+    if (digest_ok)
+        digest_ok = EVP_DigestUpdate(ctx, &index, sizeof(index)) == 1;
     if (digest_ok && EVP_DigestFinal_ex(ctx, key, &key_size) == 1 &&
         key_size == QKD_KEY_SIZE)
         success = true;
@@ -146,14 +189,22 @@ static bool can_generate_key(const struct stream_state *stream,
            requested_index < generated_keys;
 }
 
-static uint32_t generate_metadata(const struct stream_state *stream,
-                                  struct qkd_metadata_s *metadata) {
-    char value[64];
-    uint64_t age_ms = get_current_time_ms() - stream->creation_time;
-    int written = snprintf(value, sizeof(value),
-                           "{\"age\": %" PRIu64 ", \"hops\": 0}", age_ms);
+static uint32_t prepare_metadata(const struct stream_state *stream,
+                                 struct qkd_metadata_s *metadata, char *value,
+                                 uint32_t *value_size) {
+    if (!metadata || metadata->Metadata_size == 0 ||
+        stream->qos.Metadata_mimetype[0] == '\0') {
+        if (metadata && stream->qos.Metadata_mimetype[0] == '\0')
+            metadata->Metadata_size = 0;
+        *value_size = 0;
+        return QKD_STATUS_SUCCESS;
+    }
 
-    if (written < 0 || (size_t)written >= sizeof(value))
+    uint64_t age_ms = get_current_time_ms() - stream->creation_time;
+    int written =
+        snprintf(value, 64, "{\"age\": %" PRIu64 ", \"hops\": 0}", age_ms);
+
+    if (written < 0 || written >= 64)
         return QKD_STATUS_NO_CONNECTION;
 
     uint32_t required_size = (uint32_t)written + 1U;
@@ -162,9 +213,16 @@ static uint32_t generate_metadata(const struct stream_state *stream,
         return QKD_STATUS_METADATA_SIZE_INSUFFICIENT;
     }
 
-    memcpy(metadata->Metadata_buffer, value, required_size);
-    metadata->Metadata_size = (uint32_t)written;
+    *value_size = required_size;
     return QKD_STATUS_SUCCESS;
+}
+
+static bool stream_has_expired(const struct stream_state *stream) {
+    if (stream->qos.TTL == 0)
+        return false;
+
+    uint64_t lifetime_ms = (uint64_t)stream->qos.TTL * 1000U;
+    return get_current_time_ms() - stream->creation_time >= lifetime_ms;
 }
 
 static uint32_t sim_open_connect(const char *source, const char *destination,
@@ -174,34 +232,52 @@ static uint32_t sim_open_connect(const char *source, const char *destination,
     if (!source || !destination || !qos || !key_stream_id || !status)
         return set_status(status, QKD_STATUS_NO_CONNECTION);
 
-    if (!qos_is_supported(qos))
+    bool needs_generated_id = is_null_stream_id(key_stream_id);
+    int stream_idx = needs_generated_id ? -1 : find_stream(key_stream_id);
+    if (stream_idx >= 0) {
+        if (streams[stream_idx].peer_connected)
+            return set_status(status, QKD_STATUS_KSID_IN_USE);
+
+        *qos = streams[stream_idx].qos;
+        streams[stream_idx].peer_connected = true;
+        return set_status(status, QKD_STATUS_SUCCESS);
+    }
+
+    if (!normalize_qos(qos))
         return set_status(status, QKD_STATUS_QOS_NOT_MET);
 
-    bool is_initiator = key_stream_id[0] == '\0';
-    if (is_initiator) {
-        int stream_idx = allocate_stream();
-        if (stream_idx < 0)
+    if (!needs_generated_id && was_closed(key_stream_id))
+        return set_status(status, QKD_STATUS_KSID_IN_USE);
+
+    {
+        int new_stream_idx = allocate_stream();
+        if (new_stream_idx < 0)
             return set_status(status, QKD_STATUS_NO_CONNECTION);
 
-        if (!generate_stream_id(key_stream_id))
+        bool uses_legacy_id = false;
+        if (needs_generated_id &&
+            !generate_stream_id(key_stream_id, &uses_legacy_id))
             return set_status(status, QKD_STATUS_NO_CONNECTION);
-        struct stream_state *stream = &streams[stream_idx];
+        if (!needs_generated_id && !legacy_stream_id_issued &&
+            memcmp(key_stream_id, test_key_uuid, QKD_KSID_SIZE) == 0)
+            uses_legacy_id = true;
+
+        struct stream_state *stream = &streams[new_stream_idx];
         memset(stream, 0, sizeof(*stream));
         memcpy(stream->key_id, key_stream_id, QKD_KSID_SIZE);
+        stream->uses_legacy_key = uses_legacy_id;
+        if (!stream->uses_legacy_key &&
+            RAND_bytes(stream->key_secret, sizeof(stream->key_secret)) != 1) {
+            memset(stream, 0, sizeof(*stream));
+            return set_status(status, QKD_STATUS_NO_CONNECTION);
+        }
         stream->qos = *qos;
         stream->in_use = true;
         stream->creation_time = get_current_time_ms();
+        if (uses_legacy_id)
+            legacy_stream_id_issued = true;
         return set_status(status, QKD_STATUS_PEER_NOT_CONNECTED);
     }
-
-    int stream_idx = find_stream(key_stream_id);
-    if (stream_idx < 0)
-        return set_status(status, QKD_STATUS_NO_CONNECTION);
-    if (streams[stream_idx].peer_connected)
-        return set_status(status, QKD_STATUS_KSID_IN_USE);
-
-    streams[stream_idx].peer_connected = true;
-    return set_status(status, QKD_STATUS_SUCCESS);
 }
 
 static uint32_t sim_get_key(const unsigned char *key_stream_id, uint32_t *index,
@@ -215,15 +291,27 @@ static uint32_t sim_get_key(const unsigned char *key_stream_id, uint32_t *index,
         return set_status(status, QKD_STATUS_PEER_NOT_CONNECTED_GET_KEY);
 
     struct stream_state *stream = &streams[stream_idx];
+    if (stream_has_expired(stream)) {
+        remember_closed(stream->key_id);
+        memset(stream, 0, sizeof(*stream));
+        return set_status(status, QKD_STATUS_INSUFFICIENT_KEY);
+    }
+
+    char metadata_value[64];
+    uint32_t metadata_size = 0;
+    uint32_t metadata_status =
+        prepare_metadata(stream, metadata, metadata_value, &metadata_size);
+    if (metadata_status != QKD_STATUS_SUCCESS)
+        return set_status(status, metadata_status);
+
     if (!can_generate_key(stream, *index))
         return set_status(status, QKD_STATUS_INSUFFICIENT_KEY);
     if (!generate_key(stream, key_buffer, *index))
         return set_status(status, QKD_STATUS_NO_CONNECTION);
 
-    if (metadata) {
-        uint32_t metadata_status = generate_metadata(stream, metadata);
-        if (metadata_status != QKD_STATUS_SUCCESS)
-            return set_status(status, metadata_status);
+    if (metadata_size > 0) {
+        memcpy(metadata->Metadata_buffer, metadata_value, metadata_size);
+        metadata->Metadata_size = metadata_size - 1U;
     }
 
     return set_status(status, QKD_STATUS_SUCCESS);

@@ -114,28 +114,6 @@ static void test_certificate_configuration(void) {
     printf("\nCertificate Configuration Test Completed\n");
 }
 
-/* Cleanup function for a key container */
-static void cleanup_container(qkd_key_container_t *container) {
-    if (!container)
-        return;
-    for (size_t i = 0; i < container->key_count; i++) {
-        free(container->keys[i].key_ID);
-        free(container->keys[i].key);
-    }
-    free(container->keys);
-    container->keys = NULL;
-    container->key_count = 0;
-}
-
-static void cleanup_status(qkd_status_t *status) {
-    if (!status)
-        return;
-    free(status->source_KME_ID);
-    free(status->target_KME_ID);
-    free(status->master_SAE_ID);
-    free(status->slave_SAE_ID);
-}
-
 static void test_key_exchange_protocol(void) {
     printf("\nTesting QKD Protocol with Role-Based Certificates\n");
     printf("----------------------------------------------\n");
@@ -166,9 +144,18 @@ static void test_key_exchange_protocol(void) {
         TEST_FAIL("Alice GET_KEY");
         goto cleanup_alice;
     }
+    if (alice_container.key_count != 1 || !alice_container.keys ||
+        !alice_container.keys[0].key_ID || !alice_container.keys[0].key) {
+        TEST_FAIL("Alice GET_KEY response format");
+        goto cleanup_alice;
+    }
 
     // Save ALICE's key_ID for Bob to use
     char *alice_key_id = strdup(alice_container.keys[0].key_ID);
+    if (!alice_key_id) {
+        TEST_FAIL("Alice key ID allocation");
+        goto cleanup_alice;
+    }
     printf("SUCCESS: ALICE got key with ID: %s\n", alice_key_id);
     TEST_PASS("Alice GET_KEY");
 
@@ -211,6 +198,11 @@ static void test_key_exchange_protocol(void) {
         printf("ERROR: BOB's GET_KEY_WITH_IDS failed (code: %u)\n", result);
         TEST_FAIL("Bob GET_KEY_WITH_IDS");
         goto cleanup_all;
+    }
+    if (bob_container.key_count != 1 || !bob_container.keys ||
+        !bob_container.keys[0].key_ID || !bob_container.keys[0].key) {
+        TEST_FAIL("Bob GET_KEY_WITH_IDS response format");
+        goto cleanup_all;
     } else {
         printf("  Number of keys returned: %d\n", bob_container.key_count);
         for (int i = 0; i < bob_container.key_count; i++) {
@@ -223,12 +215,21 @@ static void test_key_exchange_protocol(void) {
         TEST_PASS("Bob GET_KEY_WITH_IDS");
     }
 
+    if (bob_container.key_count != alice_container.key_count ||
+        !bob_container.keys ||
+        strcmp(bob_container.keys[0].key_ID, alice_container.keys[0].key_ID) !=
+            0 ||
+        strcmp(bob_container.keys[0].key, alice_container.keys[0].key) != 0)
+        TEST_FAIL("Alice and Bob key equality");
+    else
+        TEST_PASS("Alice and Bob key equality");
+
 cleanup_all:
     free(alice_key_id);
-    cleanup_container(&bob_container);
+    qkd_key_container_free(&bob_container);
 
 cleanup_alice:
-    cleanup_container(&alice_container);
+    qkd_key_container_free(&alice_container);
 }
 
 int main(void) {
@@ -246,5 +247,5 @@ int main(void) {
     else
         printf("Overall Status : \033[1;31mSOME TESTS FAILED\033[0m\n");
     printf("========================================\n");
-    return 0;
+    return tests_failed == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
 }
