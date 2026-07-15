@@ -16,7 +16,9 @@
 
 #include "qkd_config.h"
 
+#define QKD_BITS_PER_BYTE 8U
 #define QKD_KEY_SIZE 32 /* Size of key buffer in bytes */
+#define QKD_KEY_SIZE_BITS (QKD_KEY_SIZE * QKD_BITS_PER_BYTE)
 
 #define QKD_KSID_SIZE 16    /* UUID_v4 16 bytes (128 bits) */
 #define QKD_MAX_URI_LEN 256 /* Maximum length for URIs */

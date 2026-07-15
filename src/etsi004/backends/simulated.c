@@ -22,7 +22,7 @@
 #include "etsi004/backends/simulated.h"
 #include "qkd_etsi_api.h"
 
-#ifdef QKD_USE_SIMULATED
+#if defined(QKD_USE_SIMULATED) && QKD_USE_SIMULATED
 
 #define MAX_STREAMS 16
 #define MAX_KEYS_PER_STREAM 1024
@@ -268,7 +268,7 @@ static uint32_t sim_open_connect(const char *source, const char *destination,
         stream->uses_legacy_key = uses_legacy_id;
         if (!stream->uses_legacy_key &&
             RAND_bytes(stream->key_secret, sizeof(stream->key_secret)) != 1) {
-            memset(stream, 0, sizeof(*stream));
+            OPENSSL_cleanse(stream, sizeof(*stream));
             return set_status(status, QKD_STATUS_NO_CONNECTION);
         }
         stream->qos = *qos;
@@ -293,7 +293,7 @@ static uint32_t sim_get_key(const unsigned char *key_stream_id, uint32_t *index,
     struct stream_state *stream = &streams[stream_idx];
     if (stream_has_expired(stream)) {
         remember_closed(stream->key_id);
-        memset(stream, 0, sizeof(*stream));
+        OPENSSL_cleanse(stream, sizeof(*stream));
         return set_status(status, QKD_STATUS_INSUFFICIENT_KEY);
     }
 
@@ -331,7 +331,7 @@ static uint32_t sim_close(const unsigned char *key_stream_id,
 
     struct stream_state *stream = &streams[stream_idx];
     remember_closed(stream->key_id);
-    memset(stream, 0, sizeof(*stream));
+    OPENSSL_cleanse(stream, sizeof(*stream));
 
     return set_status(status, QKD_STATUS_SUCCESS);
 }

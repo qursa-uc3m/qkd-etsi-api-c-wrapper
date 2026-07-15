@@ -16,7 +16,7 @@
 
 #include "etsi004/api.h"
 
-#ifdef QKD_USE_SIMULATED
+#if defined(QKD_USE_SIMULATED) && QKD_USE_SIMULATED
 
 extern const struct qkd_004_backend simulated_backend;
 

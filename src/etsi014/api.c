@@ -14,10 +14,11 @@
 
 #include "etsi014/api.h"
 #include "debug.h"
+#include <openssl/crypto.h>
 #include <stdlib.h>
 #include <string.h>
 
-#ifdef QKD_USE_SIMULATED
+#if defined(QKD_USE_SIMULATED) && QKD_USE_SIMULATED
 #include "etsi014/backends/simulated.h"
 static const struct qkd_014_backend *active_backend = &simulated_backend;
 #elif defined(QKD_USE_ETSI014_BACKEND)
@@ -102,6 +103,9 @@ void qkd_key_container_free(qkd_key_container_t *container) {
 
     for (int32_t i = 0; container->keys && i < container->key_count; i++) {
         free(container->keys[i].key_ID);
+        if (container->keys[i].key)
+            OPENSSL_cleanse(container->keys[i].key,
+                            strlen(container->keys[i].key));
         free(container->keys[i].key);
     }
     free(container->keys);

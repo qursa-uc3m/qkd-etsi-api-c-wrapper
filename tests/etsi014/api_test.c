@@ -15,6 +15,7 @@
 #include <string.h>
 
 #include "etsi014/api.h"
+#include "qkd_etsi_api.h"
 
 #define CHECK(condition)                                                       \
     do {                                                                       \
@@ -119,9 +120,9 @@ static void test_get_status(void) {
     CHECK(status.max_key_per_request > 0);
     CHECK(status.max_SAE_ID_count >= 0);
 #ifndef QKD_USE_ETSI014_BACKEND
-    CHECK(status.key_size == 256);
-    CHECK(status.min_key_size == 256);
-    CHECK(status.max_key_size == 256);
+    CHECK(status.key_size == QKD_KEY_SIZE_BITS);
+    CHECK(status.min_key_size == QKD_KEY_SIZE_BITS);
+    CHECK(status.max_key_size == QKD_KEY_SIZE_BITS);
     CHECK(status.max_key_per_request >= 2);
     CHECK(status.max_SAE_ID_count == 0);
     CHECK(status.stored_key_count == status.max_key_count);
@@ -135,7 +136,7 @@ static void test_get_status(void) {
 static void test_unsupported_request_features(void) {
     qkd_key_container_t container = {0};
     qkd_key_request_t request = {
-        .number = 1, .size = 256, .additional_SAE_count = 1};
+        .number = 1, .size = QKD_KEY_SIZE_BITS, .additional_SAE_count = 1};
 
     CHECK(GET_KEY(master_kme_hostname, slave_sae, &request, &container) ==
           QKD_STATUS_BAD_REQUEST);
@@ -157,7 +158,7 @@ static void test_unsupported_request_features(void) {
 
 #ifndef QKD_USE_ETSI014_BACKEND
 static void test_simulated_key_exchange(void) {
-    qkd_key_request_t request = {.number = 2, .size = 256};
+    qkd_key_request_t request = {.number = 2, .size = QKD_KEY_SIZE_BITS};
     qkd_key_container_t issued = {0};
 
     request.additional_SAE_count = 1;
@@ -249,7 +250,7 @@ static void test_simulated_key_exchange(void) {
 }
 
 static void test_simulated_capacity(void) {
-    qkd_key_request_t request = {.number = 16, .size = 256};
+    qkd_key_request_t request = {.number = 16, .size = QKD_KEY_SIZE_BITS};
     qkd_key_container_t issued = {0};
     qkd_key_container_t retrieved = {0};
 

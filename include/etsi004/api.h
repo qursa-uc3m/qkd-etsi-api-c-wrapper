@@ -82,6 +82,11 @@ void register_qkd_004_backend(const struct qkd_004_backend *backend);
 const struct qkd_004_backend *get_active_004_backend(void);
 
 /* ETSI GS QKD 004 API functions */
+/*
+ * The return value mirrors the value written to status. In particular,
+ * OPEN_CONNECT may return QKD_STATUS_PEER_NOT_CONNECTED for a successful
+ * reservation whose peer has not connected yet.
+ */
 uint32_t OPEN_CONNECT(const char *source, const char *destination,
                       struct qkd_qos_s *qos, unsigned char *key_stream_id,
                       uint32_t *status);

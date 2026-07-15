@@ -11,6 +11,7 @@
  */
 
 #include <limits.h>
+#include <openssl/crypto.h>
 #include <openssl/evp.h>
 #include <openssl/rand.h>
 #include <stdbool.h>
@@ -22,12 +23,12 @@
 #include "debug.h"
 #include "etsi014/api.h"
 #include "etsi014/backends/simulated.h"
+#include "qkd_etsi_api.h"
 
-#ifdef QKD_USE_SIMULATED
+#if defined(QKD_USE_SIMULATED) && QKD_USE_SIMULATED
 
 #define MAX_KEYS 16
 #define KEY_SIZE_BYTES 32
-#define KEY_SIZE_BITS (KEY_SIZE_BYTES * 8)
 #define BASE64_KEY_SIZE (((KEY_SIZE_BYTES + 2) / 3) * 4 + 1)
 #define UUID_STRING_SIZE 37
 
@@ -96,10 +97,13 @@ static int store_key(const qkd_key_t *key) {
 static bool create_key(qkd_key_t *key) {
     unsigned char material[KEY_SIZE_BYTES];
 
-    if (RAND_bytes(material, sizeof(material)) != 1)
+    if (RAND_bytes(material, sizeof(material)) != 1) {
+        OPENSSL_cleanse(material, sizeof(material));
         return false;
+    }
 
     key->key = base64_encode(material, sizeof(material));
+    OPENSSL_cleanse(material, sizeof(material));
     key->key_ID = generate_uuid_string();
     if (!key->key || !key->key_ID) {
         free(key->key);
@@ -130,12 +134,12 @@ static uint32_t sim_get_status(const char *kme_hostname,
         return QKD_STATUS_SERVER_ERROR;
     }
 
-    status->key_size = KEY_SIZE_BITS;
+    status->key_size = QKD_KEY_SIZE_BITS;
     status->stored_key_count = MAX_KEYS - stored_keys;
     status->max_key_count = MAX_KEYS;
     status->max_key_per_request = MAX_KEYS;
-    status->max_key_size = KEY_SIZE_BITS;
-    status->min_key_size = KEY_SIZE_BITS;
+    status->max_key_size = QKD_KEY_SIZE_BITS;
+    status->min_key_size = QKD_KEY_SIZE_BITS;
     status->max_SAE_ID_count = 0;
     return QKD_STATUS_OK;
 }
@@ -153,8 +157,9 @@ static uint32_t sim_get_key(const char *kme_hostname, const char *slave_sae_id,
     }
 
     int32_t number = request && request->number > 0 ? request->number : 1;
-    int32_t size = request && request->size > 0 ? request->size : KEY_SIZE_BITS;
-    if (number > MAX_KEYS || size != KEY_SIZE_BITS)
+    int32_t size =
+        request && request->size > 0 ? request->size : QKD_KEY_SIZE_BITS;
+    if (number > MAX_KEYS || size != QKD_KEY_SIZE_BITS)
         return QKD_STATUS_BAD_REQUEST;
     if (number > MAX_KEYS - stored_keys)
         return QKD_STATUS_SERVER_ERROR;
@@ -169,8 +174,8 @@ static uint32_t sim_get_key(const char *kme_hostname, const char *slave_sae_id,
     for (int32_t i = 0; i < number; i++) {
         if (!create_key(&container->keys[i])) {
             for (int32_t j = 0; j < i; j++) {
-                memset(&key_store[stored_indices[j]], 0,
-                       sizeof(key_store[stored_indices[j]]));
+                OPENSSL_cleanse(&key_store[stored_indices[j]],
+                                sizeof(key_store[stored_indices[j]]));
                 stored_keys--;
             }
             qkd_key_container_free(container);
@@ -179,8 +184,8 @@ static uint32_t sim_get_key(const char *kme_hostname, const char *slave_sae_id,
         stored_indices[i] = store_key(&container->keys[i]);
         if (stored_indices[i] < 0) {
             for (int32_t j = 0; j < i; j++) {
-                memset(&key_store[stored_indices[j]], 0,
-                       sizeof(key_store[stored_indices[j]]));
+                OPENSSL_cleanse(&key_store[stored_indices[j]],
+                                sizeof(key_store[stored_indices[j]]));
                 stored_keys--;
             }
             qkd_key_container_free(container);
@@ -230,8 +235,8 @@ static uint32_t sim_get_key_with_ids(const char *kme_hostname,
     }
 
     for (int32_t i = 0; i < container->key_count; i++) {
-        memset(&key_store[matched_indices[i]], 0,
-               sizeof(key_store[matched_indices[i]]));
+        OPENSSL_cleanse(&key_store[matched_indices[i]],
+                        sizeof(key_store[matched_indices[i]]));
         stored_keys--;
     }
     return QKD_STATUS_OK;

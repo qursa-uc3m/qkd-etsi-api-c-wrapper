@@ -14,13 +14,13 @@
 #include "etsi004/api.h"
 #include "debug.h"
 
-#ifdef QKD_USE_SIMULATED
+#if defined(QKD_USE_SIMULATED) && QKD_USE_SIMULATED
 #include "etsi004/backends/simulated.h"
 static const struct qkd_004_backend *active_backend = &simulated_backend;
 #elif defined(QKD_USE_ETSI014_BACKEND)
 #include "etsi004/backends/qkd_etsi014_backend.h"
 static const struct qkd_004_backend *active_backend = &qkd_etsi014_backend;
-#elif defined(QKD_USE_PYTHON_CLIENT)
+#elif defined(QKD_USE_PYTHON_CLIENT) && QKD_USE_PYTHON_CLIENT
 #include "etsi004/backends/python_client.h"
 static const struct qkd_004_backend *active_backend = &python_client_backend;
 #else

@@ -262,7 +262,7 @@ static char *build_post_data(const qkd_key_ids_t *key_ids,
             json_decref(ids);
             return NULL;
         }
-#ifdef QKD_USE_QUKAYDEE
+#if defined(QKD_USE_QUKAYDEE) && QKD_USE_QUKAYDEE
         if (json_object_set_new(entry, "master_SAE_ID",
                                 json_string(master_sae_id)) != 0) {
             json_decref(entry);

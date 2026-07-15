@@ -52,10 +52,16 @@ The build system supports the following configuration parameters:
   - qukaydee: Available for ETSI 014
   - python_client: Available for ETSI 004
 
-The `simulated` backend is intended for tests and integration development. It
-does not provide production QKD security. Its first ETSI 004 stream retains the
-historical deterministic fixture for compatibility; subsequent streams use
-random per-stream state.
+The `simulated` backend is intended for same-process tests. It does not provide
+production QKD security, and its in-memory stream/key stores are not shared by
+separate client and server processes. Multi-process integration tests shall use
+a shared KME backend (for example, the ETSI 004 Python client or an ETSI 014
+HTTPS KME). Its first ETSI 004 stream retains the historical deterministic
+fixture for compatibility; subsequent streams use random per-stream state.
+
+ETSI 004 `Key_chunk_size` is expressed in bytes. ETSI 014 key request and
+status sizes are expressed in bits; use `QKD_KEY_SIZE_BITS` when requesting the
+wrapper's default 256-bit key.
 
 The ETSI 004 and ETSI 014 specifications both define a C function named
 `GET_KEY`, but with incompatible signatures. Consequently, a build with both
