@@ -6,148 +6,147 @@
  * - Javier Blanco-Romero (@fj-blanco) - UC3M
  */
 
-/*
- * tests/etsi004/api_test.c
- */
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 
 #include "etsi004/api.h"
 #include "qkd_etsi_api.h"
-#include <assert.h>
-#include <stdio.h>
-#include <string.h>
-#include <unistd.h>
 
-/* Helper function to simulate peer connection */
-static void simulate_peer_connection(const unsigned char *ksid) {
-    uint32_t status;
-    struct qkd_qos_s peer_qos = {.Key_chunk_size = QKD_KEY_SIZE,
-                                 .Max_bps = 1000,
-                                 .Min_bps = 100,
-                                 .Jitter = 10,
-                                 .Priority = 1,
-                                 .Timeout = 1000,
-                                 .TTL = 1};
+#define CHECK(condition)                                                       \
+    do {                                                                       \
+        if (!(condition)) {                                                    \
+            fprintf(stderr, "CHECK failed at %s:%d: %s\n", __FILE__, __LINE__, \
+                    #condition);                                               \
+            exit(EXIT_FAILURE);                                                \
+        }                                                                      \
+    } while (0)
 
-    // Responder connects with existing KSID
-    status = OPEN_CONNECT("qkd://localhost/bob", "qkd://localhost/alice",
-                          &peer_qos, (unsigned char *)ksid, &status);
-    assert(status == QKD_STATUS_SUCCESS);
+static struct qkd_qos_s supported_qos(void) {
+    struct qkd_qos_s qos = {
+        .Key_chunk_size = QKD_KEY_SIZE,
+        .Max_bps = 1000000,
+        .Min_bps = 100,
+        .Jitter = 10,
+        .Priority = 1,
+        .Timeout = 1000,
+        .TTL = 1,
+    };
+    memcpy(qos.Metadata_mimetype, "application/json",
+           sizeof("application/json"));
+    return qos;
 }
 
-static void test_open_connect_close(void) {
-    uint32_t status;
-    struct qkd_qos_s qos = {.Key_chunk_size = QKD_KEY_SIZE,
-                            .Max_bps = 1000,
-                            .Min_bps = 100,
-                            .Jitter = 10,
-                            .Priority = 1,
-                            .Timeout = 1000,
-                            .TTL = 1};
+static void test_backend_registration(void) {
+    const struct qkd_004_backend *backend = get_active_004_backend();
+
+    CHECK(backend != NULL);
+    register_qkd_004_backend(NULL);
+    CHECK(get_active_004_backend() == NULL);
+    CHECK(OPEN_CONNECT(NULL, NULL, NULL, NULL, NULL) ==
+          QKD_STATUS_NO_CONNECTION);
+    register_qkd_004_backend(backend);
+    CHECK(get_active_004_backend() == backend);
+}
+
+static void test_connection_lifecycle(void) {
+    struct qkd_qos_s qos = supported_qos();
     unsigned char key_stream_id[QKD_KSID_SIZE] = {0};
-    const char *source = "qkd://localhost/alice";
-    const char *destination = "qkd://localhost/bob";
+    uint32_t status = UINT32_MAX;
 
-    printf("Testing OPEN_CONNECT/CLOSE...\n");
+    CHECK(OPEN_CONNECT("alice", "bob", &qos, key_stream_id, NULL) ==
+          QKD_STATUS_NO_CONNECTION);
 
-    // Test 1: Initial OPEN_CONNECT as initiator
-    status = OPEN_CONNECT(source, destination, &qos, key_stream_id, &status);
-    assert(status == QKD_STATUS_PEER_DISCONNECTED);
-    printf("  Initiator OPEN_CONNECT: PASS\n");
-
-    // Test 2: Simulate peer connection
-    simulate_peer_connection(key_stream_id);
-    printf("  Peer connection: PASS\n");
-
-    // Test 3: Try to reuse same KSID (should fail)
-    status = OPEN_CONNECT(source, destination, &qos, key_stream_id, &status);
-    assert(status == QKD_STATUS_KSID_IN_USE);
-    printf("  KSID reuse prevention: PASS\n");
-
-    // Test 4: Test invalid parameters
-    status = OPEN_CONNECT(NULL, destination, &qos, key_stream_id, &status);
-    assert(status == QKD_STATUS_NO_CONNECTION);
-    printf("  NULL parameter handling: PASS\n");
-
-    // Test 5: Test QoS validation
     struct qkd_qos_s invalid_qos = qos;
-    invalid_qos.Min_bps = 2000; // Higher than Max_bps
-    status =
-        OPEN_CONNECT(source, destination, &invalid_qos, key_stream_id, &status);
-    assert(status == QKD_STATUS_QOS_NOT_MET);
-    printf("  QoS validation: PASS\n");
+    invalid_qos.Min_bps = invalid_qos.Max_bps + 1U;
+    CHECK(OPEN_CONNECT("alice", "bob", &invalid_qos, key_stream_id, &status) ==
+          QKD_STATUS_QOS_NOT_MET);
+    CHECK(status == QKD_STATUS_QOS_NOT_MET);
 
-    // Test 6: Close connection
-    status = CLOSE(key_stream_id, &status);
-    assert(status == QKD_STATUS_SUCCESS);
-    printf("  CLOSE: PASS\n");
+    CHECK(OPEN_CONNECT("alice", "bob", &qos, key_stream_id, &status) ==
+          QKD_STATUS_PEER_NOT_CONNECTED);
+    CHECK(status == QKD_STATUS_PEER_DISCONNECTED);
 
-    // Test 7: Wait for TTL and try close again
-    sleep(1); // In real tests, you might want to make TTL shorter for testing
-    status = CLOSE(key_stream_id, &status);
-    assert(status == QKD_STATUS_SUCCESS);
-    printf("  TTL handling: PASS\n");
+    unsigned char second_stream_id[QKD_KSID_SIZE] = {0};
+    CHECK(OPEN_CONNECT("alice", "bob", &qos, second_stream_id, &status) ==
+          QKD_STATUS_PEER_NOT_CONNECTED);
+    CHECK(memcmp(key_stream_id, second_stream_id, QKD_KSID_SIZE) != 0);
+    CHECK(CLOSE(second_stream_id, &status) == QKD_STATUS_SUCCESS);
+
+    unsigned char key[QKD_KEY_SIZE];
+    uint32_t index = 0;
+    CHECK(GET_KEY(key_stream_id, &index, key, NULL, &status) ==
+          QKD_STATUS_PEER_NOT_CONNECTED_GET_KEY);
+
+    CHECK(OPEN_CONNECT("bob", "alice", &qos, key_stream_id, &status) ==
+          QKD_STATUS_SUCCESS);
+    CHECK(OPEN_CONNECT("bob", "alice", &qos, key_stream_id, &status) ==
+          QKD_STATUS_KSID_IN_USE);
+
+    CHECK(CLOSE(key_stream_id, &status) == QKD_STATUS_SUCCESS);
+    CHECK(GET_KEY(key_stream_id, &index, key, NULL, &status) ==
+          QKD_STATUS_PEER_NOT_CONNECTED_GET_KEY);
+    CHECK(CLOSE(key_stream_id, &status) == QKD_STATUS_SUCCESS);
+    CHECK(CLOSE(key_stream_id, &status) == QKD_STATUS_SUCCESS);
 }
 
-static void test_get_key(void) {
-    uint32_t status;
-    struct qkd_qos_s qos = {.Key_chunk_size = QKD_KEY_SIZE,
-                            .Max_bps = 1000,
-                            .Min_bps = 100,
-                            .Jitter = 10,
-                            .Priority = 1,
-                            .Timeout = 1000,
-                            .TTL = 1};
+static void test_key_and_metadata(void) {
+    struct qkd_qos_s qos = supported_qos();
     unsigned char key_stream_id[QKD_KSID_SIZE] = {0};
-    unsigned char key_buffer1[QKD_KEY_SIZE];
-    unsigned char key_buffer2[QKD_KEY_SIZE];
+    unsigned char first_key[QKD_KEY_SIZE];
+    unsigned char repeated_key[QKD_KEY_SIZE];
     uint32_t index = 0;
+    uint32_t status;
+
+    CHECK(OPEN_CONNECT("alice", "bob", &qos, key_stream_id, &status) ==
+          QKD_STATUS_PEER_NOT_CONNECTED);
+    CHECK(OPEN_CONNECT("bob", "alice", &qos, key_stream_id, &status) ==
+          QKD_STATUS_SUCCESS);
+
+    CHECK(GET_KEY(key_stream_id, &index, first_key, NULL, &status) ==
+          QKD_STATUS_SUCCESS);
+    CHECK(GET_KEY(key_stream_id, &index, repeated_key, NULL, &status) ==
+          QKD_STATUS_SUCCESS);
+    CHECK(memcmp(first_key, repeated_key, sizeof(first_key)) == 0);
+
+    unsigned char second_stream_id[QKD_KSID_SIZE] = {0};
+    unsigned char second_stream_key[QKD_KEY_SIZE];
+    CHECK(OPEN_CONNECT("alice", "bob", &qos, second_stream_id, &status) ==
+          QKD_STATUS_PEER_NOT_CONNECTED);
+    CHECK(OPEN_CONNECT("bob", "alice", &qos, second_stream_id, &status) ==
+          QKD_STATUS_SUCCESS);
+    CHECK(GET_KEY(second_stream_id, &index, second_stream_key, NULL, &status) ==
+          QKD_STATUS_SUCCESS);
+    CHECK(memcmp(first_key, second_stream_key, sizeof(first_key)) != 0);
+    CHECK(CLOSE(second_stream_id, &status) == QKD_STATUS_SUCCESS);
+
+    index = 1000000;
+    CHECK(GET_KEY(key_stream_id, &index, repeated_key, NULL, &status) ==
+          QKD_STATUS_INSUFFICIENT_KEY);
+
     struct qkd_metadata_s metadata = {0};
-    const char *source = "qkd://localhost/alice";
-    const char *destination = "qkd://localhost/bob";
+    index = 0;
+    CHECK(GET_KEY(key_stream_id, &index, repeated_key, &metadata, &status) ==
+          QKD_STATUS_METADATA_SIZE_INSUFFICIENT);
+    CHECK(metadata.Metadata_size > 1);
 
-    printf("\nTesting GET_KEY...\n");
+    unsigned char metadata_buffer[QKD_METADATA_MAX_SIZE];
+    metadata.Metadata_buffer = metadata_buffer;
+    metadata.Metadata_size = sizeof(metadata_buffer);
+    CHECK(GET_KEY(key_stream_id, &index, repeated_key, &metadata, &status) ==
+          QKD_STATUS_SUCCESS);
+    CHECK(metadata.Metadata_size > 0);
+    CHECK(metadata_buffer[metadata.Metadata_size] == '\0');
 
-    // Test 1: Setup connection
-    status = OPEN_CONNECT(source, destination, &qos, key_stream_id, &status);
-    assert(status == QKD_STATUS_PEER_DISCONNECTED);
-    simulate_peer_connection(key_stream_id);
-    printf("  Connection setup: PASS\n");
-
-    // Test 2: Get first key
-    status = GET_KEY(key_stream_id, &index, key_buffer1, &metadata, &status);
-    assert(status == QKD_STATUS_SUCCESS);
-    printf("  Initial key retrieval: PASS\n");
-
-    // Test 3: Get same key again (should be identical due to index)
-    status = GET_KEY(key_stream_id, &index, key_buffer2, &metadata, &status);
-    assert(status == QKD_STATUS_SUCCESS);
-    assert(memcmp(key_buffer1, key_buffer2, QKD_KEY_SIZE) == 0);
-    printf("  Key determinism: PASS\n");
-
-    // Test 4: Get key with different index
-    index = 1;
-    status = GET_KEY(key_stream_id, &index, key_buffer2, &metadata, &status);
-    assert(status == QKD_STATUS_SUCCESS);
-    assert(memcmp(key_buffer1, key_buffer2, QKD_KEY_SIZE) != 0);
-    printf("  Index-based key generation: PASS\n");
-
-    // Test 5: Test rate limiting
-    index = 1000000; // Way beyond what Max_bps allows
-    status = GET_KEY(key_stream_id, &index, key_buffer1, &metadata, &status);
-    assert(status == QKD_STATUS_INSUFFICIENT_KEY);
-    printf("  Rate limiting: PASS\n");
-
-    status = CLOSE(key_stream_id, &status);
-    assert(status == QKD_STATUS_SUCCESS);
+    CHECK(CLOSE(key_stream_id, &status) == QKD_STATUS_SUCCESS);
+    CHECK(CLOSE(key_stream_id, &status) == QKD_STATUS_SUCCESS);
 }
 
 int main(void) {
-    printf("Running QKD ETSI API tests...\n\n");
-
-    // Run all tests
-    test_open_connect_close();
-    test_get_key();
-
-    printf("\nAll tests passed!\n");
+    test_backend_registration();
+    test_connection_lifecycle();
+    test_key_and_metadata();
+    puts("ETSI 004 simulated backend tests passed");
     return 0;
 }

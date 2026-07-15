@@ -14,12 +14,12 @@
 #ifndef QKD_ETSI004_SIMULATED_H_
 #define QKD_ETSI004_SIMULATED_H_
 
-#include "qkd_etsi_api.h"
+#include "etsi004/api.h"
 
 #ifdef QKD_USE_SIMULATED
 
 extern const struct qkd_004_backend simulated_backend;
 
-#endif /* QKD_ETSI004_SIMULATED_H_ */
-
 #endif /* QKD_USE_SIMULATED */
+
+#endif /* QKD_ETSI004_SIMULATED_H_ */

@@ -10,131 +10,190 @@
  * src/etsi014/backends/simulated.c
  */
 
-#include "etsi014/backends/simulated.h"
-#include "debug.h"
-#include "etsi014/api.h"
-#include <openssl/bio.h>
-#include <openssl/buffer.h>
+#include <limits.h>
 #include <openssl/evp.h>
-#include <stdio.h>
+#include <openssl/rand.h>
+#include <stdbool.h>
+#include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
-#include <unistd.h>
 #include <uuid/uuid.h>
+
+#include "debug.h"
+#include "etsi014/api.h"
+#include "etsi014/backends/simulated.h"
 
 #ifdef QKD_USE_SIMULATED
 
 #define MAX_KEYS 16
-#define KEY_SIZE 32
-#define API_DELAY_MS 100
+#define KEY_SIZE_BYTES 32
+#define KEY_SIZE_BITS (KEY_SIZE_BYTES * 8)
+#define BASE64_KEY_SIZE (((KEY_SIZE_BYTES + 2) / 3) * 4 + 1)
+#define UUID_STRING_SIZE 37
 
-static struct {
-    char *key_data; // Base64 encoded
-    char *key_id;   // UUID format
-} key_store[MAX_KEYS];
+struct stored_key {
+    char key_data[BASE64_KEY_SIZE];
+    char key_id[UUID_STRING_SIZE];
+    bool in_use;
+};
 
-static size_t stored_keys = 0;
+static struct stored_key key_store[MAX_KEYS];
+static int32_t stored_keys;
 
-static char *base64_encode(const unsigned char *input, int length) {
-    BIO *bmem, *b64;
-    BUF_MEM *bptr;
+static void cleanup_container(qkd_key_container_t *container) {
+    if (!container || !container->keys)
+        return;
 
-    b64 = BIO_new(BIO_f_base64());
-    bmem = BIO_new(BIO_s_mem());
-    b64 = BIO_push(b64, bmem);
-
-    BIO_set_flags(b64, BIO_FLAGS_BASE64_NO_NL);
-    BIO_write(b64, input, length);
-    BIO_flush(b64);
-
-    BIO_get_mem_ptr(b64, &bptr);
-
-    char *buff = malloc(bptr->length + 1);
-    if (!buff) {
-        BIO_free_all(b64);
-        return NULL;
+    for (int32_t i = 0; i < container->key_count; i++) {
+        free(container->keys[i].key_ID);
+        free(container->keys[i].key);
     }
-
-    memcpy(buff, bptr->data, bptr->length);
-    buff[bptr->length] = 0;
-
-    BIO_free_all(b64);
-    return buff;
+    free(container->keys);
+    memset(container, 0, sizeof(*container));
 }
 
-// Generate a valid UUID string
-static char *generate_uuid_string() {
-    uuid_t uuid;
-    char *uuid_str = malloc(37); // 36 chars + null terminator
+static char *base64_encode(const unsigned char *input, size_t length) {
+    if (length > INT_MAX)
+        return NULL;
 
-    if (!uuid_str) {
+    size_t encoded_size = 4U * ((length + 2U) / 3U);
+    char *encoded = malloc(encoded_size + 1U);
+    if (!encoded)
+        return NULL;
+
+    int result = EVP_EncodeBlock((unsigned char *)encoded, input, (int)length);
+    if (result < 0 || (size_t)result != encoded_size) {
+        free(encoded);
         return NULL;
     }
+    encoded[encoded_size] = '\0';
+    return encoded;
+}
 
-    uuid_generate(uuid);
-    uuid_unparse(uuid, uuid_str);
+static char *generate_uuid_string(void) {
+    uuid_t uuid;
+    char *uuid_string = malloc(UUID_STRING_SIZE);
 
-    return uuid_str;
+    if (!uuid_string)
+        return NULL;
+    uuid_generate_random(uuid);
+    uuid_unparse_lower(uuid, uuid_string);
+    return uuid_string;
+}
+
+static int find_key(const char *key_id) {
+    if (!key_id)
+        return -1;
+
+    for (int i = 0; i < MAX_KEYS; i++) {
+        if (key_store[i].in_use && strcmp(key_store[i].key_id, key_id) == 0)
+            return i;
+    }
+    return -1;
+}
+
+static int store_key(const qkd_key_t *key) {
+    for (int i = 0; i < MAX_KEYS; i++) {
+        if (!key_store[i].in_use) {
+            memcpy(key_store[i].key_id, key->key_ID, UUID_STRING_SIZE);
+            memcpy(key_store[i].key_data, key->key, BASE64_KEY_SIZE);
+            key_store[i].in_use = true;
+            stored_keys++;
+            return i;
+        }
+    }
+    return -1;
+}
+
+static bool create_key(qkd_key_t *key) {
+    unsigned char material[KEY_SIZE_BYTES];
+
+    if (RAND_bytes(material, sizeof(material)) != 1)
+        return false;
+
+    key->key = base64_encode(material, sizeof(material));
+    key->key_ID = generate_uuid_string();
+    if (!key->key || !key->key_ID) {
+        free(key->key);
+        free(key->key_ID);
+        memset(key, 0, sizeof(*key));
+        return false;
+    }
+    return true;
 }
 
 static uint32_t sim_get_status(const char *kme_hostname,
                                const char *slave_sae_id, qkd_status_t *status) {
-    usleep(API_DELAY_MS * 1000);
-    if (!kme_hostname || !slave_sae_id) {
-        QKD_DBG_ERR("sim_get_status: NULL hostname or slave SAE ID");
+    if (!kme_hostname || !slave_sae_id || !status)
         return QKD_STATUS_BAD_REQUEST;
+
+    memset(status, 0, sizeof(*status));
+    status->source_KME_ID = strdup(kme_hostname);
+    status->target_KME_ID = strdup(kme_hostname);
+    status->master_SAE_ID = strdup("SIMULATED_MASTER_SAE");
+    status->slave_SAE_ID = strdup(slave_sae_id);
+    if (!status->source_KME_ID || !status->target_KME_ID ||
+        !status->master_SAE_ID || !status->slave_SAE_ID) {
+        free(status->source_KME_ID);
+        free(status->target_KME_ID);
+        free(status->master_SAE_ID);
+        free(status->slave_SAE_ID);
+        memset(status, 0, sizeof(*status));
+        return QKD_STATUS_SERVER_ERROR;
     }
-    status->key_size = KEY_SIZE;
+
+    status->key_size = KEY_SIZE_BITS;
     status->stored_key_count = stored_keys;
     status->max_key_count = MAX_KEYS;
-    status->max_key_per_request = 1;
-
-    // Optional: Set source KME ID if needed
-    status->source_KME_ID = strdup(kme_hostname);
-
+    status->max_key_per_request = MAX_KEYS;
+    status->max_key_size = KEY_SIZE_BITS;
+    status->min_key_size = KEY_SIZE_BITS;
+    status->max_SAE_ID_count = 1;
     return QKD_STATUS_OK;
 }
 
 static uint32_t sim_get_key(const char *kme_hostname, const char *slave_sae_id,
                             qkd_key_request_t *request,
                             qkd_key_container_t *container) {
-    usleep(API_DELAY_MS * 1000);
-
-    // Fixed test key from ETSI 004
-    static const unsigned char test_key[KEY_SIZE] = {
-        0x8f, 0x40, 0xc5, 0xad, 0xb6, 0x8f, 0x25, 0x62, 0x4a, 0xe5, 0xb2,
-        0x14, 0xea, 0x76, 0x7a, 0x6e, 0xc9, 0x4d, 0x82, 0x9d, 0x3d, 0x7b,
-        0x5e, 0x1a, 0xd1, 0xba, 0x6f, 0x3e, 0x21, 0x38, 0x28, 0x5f};
-
-    container->key_count = 1;
-    container->keys = calloc(1, sizeof(qkd_key_t));
-    if (!container->keys) {
+    if (!kme_hostname || !slave_sae_id || !container)
         return QKD_STATUS_BAD_REQUEST;
-    }
-
-    container->keys[0].key = base64_encode(test_key, KEY_SIZE);
-    if (!container->keys[0].key) {
-        free(container->keys);
-        container->keys = NULL;
+    if (request && (request->number < 0 || request->size < 0))
         return QKD_STATUS_BAD_REQUEST;
-    }
 
-    // Only return key ID if request is not NULL (initiator case)
-    container->keys[0].key_ID = generate_uuid_string();
-    if (!container->keys[0].key_ID) {
-        free(container->keys[0].key);
-        free(container->keys);
-        container->keys = NULL;
+    int32_t number = request && request->number > 0 ? request->number : 1;
+    int32_t size = request && request->size > 0 ? request->size : KEY_SIZE_BITS;
+    if (number > MAX_KEYS || size != KEY_SIZE_BITS ||
+        number > MAX_KEYS - stored_keys)
         return QKD_STATUS_BAD_REQUEST;
-    }
 
-    // For demonstration, store this key in our key_store
-    if (stored_keys < MAX_KEYS) {
-        key_store[stored_keys].key_data = strdup(container->keys[0].key);
-        key_store[stored_keys].key_id = strdup(container->keys[0].key_ID);
-        stored_keys++;
-    }
+    memset(container, 0, sizeof(*container));
+    container->keys = calloc((size_t)number, sizeof(*container->keys));
+    if (!container->keys)
+        return QKD_STATUS_SERVER_ERROR;
+    container->key_count = number;
 
+    int stored_indices[MAX_KEYS];
+    for (int32_t i = 0; i < number; i++) {
+        if (!create_key(&container->keys[i])) {
+            for (int32_t j = 0; j < i; j++) {
+                memset(&key_store[stored_indices[j]], 0,
+                       sizeof(key_store[stored_indices[j]]));
+                stored_keys--;
+            }
+            cleanup_container(container);
+            return QKD_STATUS_SERVER_ERROR;
+        }
+        stored_indices[i] = store_key(&container->keys[i]);
+        if (stored_indices[i] < 0) {
+            for (int32_t j = 0; j < i; j++) {
+                memset(&key_store[stored_indices[j]], 0,
+                       sizeof(key_store[stored_indices[j]]));
+                stored_keys--;
+            }
+            cleanup_container(container);
+            return QKD_STATUS_SERVER_ERROR;
+        }
+    }
     return QKD_STATUS_OK;
 }
 
@@ -142,47 +201,45 @@ static uint32_t sim_get_key_with_ids(const char *kme_hostname,
                                      const char *master_sae_id,
                                      qkd_key_ids_t *key_ids,
                                      qkd_key_container_t *container) {
-    usleep(API_DELAY_MS * 1000);
-
-    if (!key_ids || key_ids->key_ID_count == 0 || !key_ids->key_IDs) {
+    if (!kme_hostname || !master_sae_id || !key_ids || !container ||
+        key_ids->key_ID_count <= 0 || key_ids->key_ID_count > MAX_KEYS ||
+        !key_ids->key_IDs)
         return QKD_STATUS_BAD_REQUEST;
+
+    int matched_indices[MAX_KEYS];
+    for (int32_t i = 0; i < key_ids->key_ID_count; i++) {
+        matched_indices[i] = find_key(key_ids->key_IDs[i].key_ID);
+        if (matched_indices[i] < 0)
+            return QKD_STATUS_BAD_REQUEST;
+        for (int32_t j = 0; j < i; j++) {
+            if (matched_indices[j] == matched_indices[i])
+                return QKD_STATUS_BAD_REQUEST;
+        }
     }
 
-    // We could search through the key_store for the key ID, but for simplicity
-    // in this simulation, we'll just return the same key
+    memset(container, 0, sizeof(*container));
+    container->keys =
+        calloc((size_t)key_ids->key_ID_count, sizeof(*container->keys));
+    if (!container->keys)
+        return QKD_STATUS_SERVER_ERROR;
+    container->key_count = key_ids->key_ID_count;
 
-    // Fixed test key from ETSI 004
-    static const unsigned char test_key[KEY_SIZE] = {
-        0x8f, 0x40, 0xc5, 0xad, 0xb6, 0x8f, 0x25, 0x62, 0x4a, 0xe5, 0xb2,
-        0x14, 0xea, 0x76, 0x7a, 0x6e, 0xc9, 0x4d, 0x82, 0x9d, 0x3d, 0x7b,
-        0x5e, 0x1a, 0xd1, 0xba, 0x6f, 0x3e, 0x21, 0x38, 0x28, 0x5f};
-
-    container->key_count = 1;
-    container->keys = calloc(1, sizeof(qkd_key_t));
-    if (!container->keys) {
-        return QKD_STATUS_BAD_REQUEST;
+    for (int32_t i = 0; i < container->key_count; i++) {
+        struct stored_key *stored = &key_store[matched_indices[i]];
+        container->keys[i].key_ID = strdup(stored->key_id);
+        container->keys[i].key = strdup(stored->key_data);
+        if (!container->keys[i].key_ID || !container->keys[i].key) {
+            cleanup_container(container);
+            return QKD_STATUS_SERVER_ERROR;
+        }
     }
 
-    container->keys[0].key = base64_encode(test_key, KEY_SIZE);
-    if (!container->keys[0].key) {
-        free(container->keys);
-        container->keys = NULL;
-        return QKD_STATUS_BAD_REQUEST;
+    for (int32_t i = 0; i < container->key_count; i++) {
+        memset(&key_store[matched_indices[i]], 0,
+               sizeof(key_store[matched_indices[i]]));
+        stored_keys--;
     }
-
-    // For completeness, we could include the requested key ID in the response
-    // container->keys[0].key_ID = strdup(key_ids->key_IDs[0].key_ID);
-
     return QKD_STATUS_OK;
-}
-
-// Cleanup function for releasing memory - will be called externally
-static void sim_cleanup_resources() {
-    for (size_t i = 0; i < stored_keys; i++) {
-        free(key_store[i].key_data);
-        free(key_store[i].key_id);
-    }
-    stored_keys = 0;
 }
 
 const struct qkd_014_backend simulated_backend = {.name = "simulated",

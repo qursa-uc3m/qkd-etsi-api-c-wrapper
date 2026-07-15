@@ -25,6 +25,14 @@ static const struct qkd_014_backend *active_backend = &qkd_etsi014_backend;
 static const struct qkd_014_backend *active_backend = NULL;
 #endif
 
+void register_qkd_014_backend(const struct qkd_014_backend *backend) {
+    active_backend = backend;
+}
+
+const struct qkd_014_backend *get_active_014_backend(void) {
+    return active_backend;
+}
+
 uint32_t GET_STATUS(const char *kme_hostname, const char *slave_sae_id,
                     qkd_status_t *status) {
     if (!kme_hostname || !slave_sae_id || !status) {
@@ -42,8 +50,6 @@ uint32_t GET_STATUS(const char *kme_hostname, const char *slave_sae_id,
 
 uint32_t GET_KEY(const char *kme_hostname, const char *slave_sae_id,
                  qkd_key_request_t *request, qkd_key_container_t *container) {
-    // print the active backend name
-    QKD_DBG_INFO("GET_KEY(): Active backend name: %s\n", active_backend->name);
     if (!kme_hostname || !slave_sae_id || !container) {
         QKD_DBG_ERR("Invalid parameters in GET_KEY");
         return QKD_STATUS_BAD_REQUEST;
@@ -53,6 +59,8 @@ uint32_t GET_KEY(const char *kme_hostname, const char *slave_sae_id,
         QKD_DBG_ERR("No REST backend available");
         return QKD_STATUS_SERVER_ERROR;
     }
+
+    QKD_DBG_INFO("GET_KEY(): Active backend name: %s", active_backend->name);
 
     return active_backend->get_key(kme_hostname, slave_sae_id, request,
                                    container);

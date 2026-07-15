@@ -30,6 +30,8 @@ extern "C" {
 #define QKD_STATUS_SUCCESS 0 /* Successful */
 #define QKD_STATUS_PEER_NOT_CONNECTED                                          \
     1 /* Successful connection, peer not connected */
+/* Historical name retained for source compatibility. */
+#define QKD_STATUS_PEER_DISCONNECTED QKD_STATUS_PEER_NOT_CONNECTED
 #define QKD_STATUS_INSUFFICIENT_KEY 2 /* GET_KEY failed: insufficient key */
 #define QKD_STATUS_PEER_NOT_CONNECTED_GET_KEY                                  \
     3                              /* GET_KEY failed: peer not connected */

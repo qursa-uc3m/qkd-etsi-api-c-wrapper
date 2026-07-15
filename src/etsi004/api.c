@@ -27,11 +27,18 @@ static const struct qkd_004_backend *active_backend = &python_client_backend;
 static const struct qkd_004_backend *active_backend = NULL;
 #endif
 
-/* API function implementations remain the same */
+void register_qkd_004_backend(const struct qkd_004_backend *backend) {
+    active_backend = backend;
+}
+
+const struct qkd_004_backend *get_active_004_backend(void) {
+    return active_backend;
+}
+
 uint32_t OPEN_CONNECT(const char *source, const char *destination,
                       struct qkd_qos_s *qos, unsigned char *key_stream_id,
                       uint32_t *status) {
-    if (!active_backend) {
+    if (!active_backend || !active_backend->open_connect) {
         QKD_DBG_ERR("No QKD backend registered");
         if (status)
             *status = QKD_STATUS_NO_CONNECTION;
@@ -44,7 +51,7 @@ uint32_t OPEN_CONNECT(const char *source, const char *destination,
 uint32_t GET_KEY(const unsigned char *key_stream_id, uint32_t *index,
                  unsigned char *key_buffer, struct qkd_metadata_s *metadata,
                  uint32_t *status) {
-    if (!active_backend) {
+    if (!active_backend || !active_backend->get_key) {
         QKD_DBG_ERR("No QKD backend registered");
         if (status)
             *status = QKD_STATUS_NO_CONNECTION;
@@ -55,7 +62,7 @@ uint32_t GET_KEY(const unsigned char *key_stream_id, uint32_t *index,
 }
 
 uint32_t CLOSE(const unsigned char *key_stream_id, uint32_t *status) {
-    if (!active_backend) {
+    if (!active_backend || !active_backend->close) {
         QKD_DBG_ERR("No QKD backend registered");
         if (status)
             *status = QKD_STATUS_NO_CONNECTION;
