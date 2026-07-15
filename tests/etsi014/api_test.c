@@ -1,4 +1,4 @@
-/* 
+/*
  * Copyright (C) 2024 QURSA Project
  * SPDX-License-Identifier: MIT
  *
@@ -46,7 +46,7 @@ static void init_test_config(void) {
     TEST_SKME_HOSTNAME = get_required_env("QKD_SLAVE_KME_HOSTNAME");
     TEST_MASTER_SAE = get_required_env("QKD_MASTER_SAE");
     TEST_SLAVE_SAE = get_required_env("QKD_SLAVE_SAE");
-    
+
     printf("Using configuration:\n");
     printf("  Master KME Hostname: %s\n", TEST_MKME_HOSTNAME);
     printf("  Slave KME Hostname: %s\n", TEST_SKME_HOSTNAME);
@@ -93,21 +93,19 @@ static void test_get_status(void) {
 }
 
 static void test_get_key(void) {
-    qkd_key_request_t request = {
-        .number = 2, 
-        .size = 256,
-        .additional_slave_SAE_IDs = NULL,
-        .additional_SAE_count = 0,
-        .extension_mandatory = NULL,
-        .extension_optional = NULL
-    };
+    qkd_key_request_t request = {.number = 2,
+                                 .size = 256,
+                                 .additional_slave_SAE_IDs = NULL,
+                                 .additional_SAE_count = 0,
+                                 .extension_mandatory = NULL,
+                                 .extension_optional = NULL};
     qkd_key_container_t container = {0};
     uint32_t result;
 
     printf("\nTesting GET_KEY...\n");
 
     // Test 1: Request keys
-    result = GET_KEY(TEST_MKME_HOSTNAME, TEST_SLAVE_SAE, &request, &container);    
+    result = GET_KEY(TEST_MKME_HOSTNAME, TEST_SLAVE_SAE, &request, &container);
     assert(result == QKD_STATUS_OK);
     assert(container.key_count == request.number);
     assert(container.keys != NULL);
@@ -127,18 +125,15 @@ static void test_get_key(void) {
     // Test 3: Test key retrieval with ID
     qkd_key_id_t key_id = {.key_ID = saved_key_id, .key_ID_extension = NULL};
     qkd_key_ids_t key_ids = {
-        .key_IDs = &key_id, 
-        .key_ID_count = 1, 
-        .key_IDs_extension = NULL
-    };
+        .key_IDs = &key_id, .key_ID_count = 1, .key_IDs_extension = NULL};
 
     // Test: Request a key that was already retrived
     result = GET_KEY_WITH_IDS(TEST_SKME_HOSTNAME, TEST_MASTER_SAE, &key_ids,
-                               &container);
-    #ifndef QKD_USE_ETSI014_BACKEND
+                              &container);
+#ifndef QKD_USE_ETSI014_BACKEND
     assert(result == QKD_STATUS_OK);
     assert(container.key_count == 1);
-    #else
+#else
     assert(result == QKD_STATUS_SERVER_ERROR);
     printf("  Old key retrieval by ID : PASS\n");
 
@@ -154,7 +149,8 @@ static void test_get_key(void) {
 
     if (!SLAVE_CERT_PATH || !SLAVE_KEY_PATH || !SLAVE_CA_CERT_PATH) {
         printf("Required certificate environment variables not set for TEST");
-        printf("Please set: QKD_SLAVE_CERT_PATH, QKD_SLAVE_KEY_PATH, QKD_SLAVE_CA_CERT_PATH");
+        printf("Please set: QKD_SLAVE_CERT_PATH, QKD_SLAVE_KEY_PATH, "
+               "QKD_SLAVE_CA_CERT_PATH");
         exit(1);
     }
 
@@ -163,7 +159,7 @@ static void test_get_key(void) {
     setenv("QKD_MASTER_CA_CERT_PATH", SLAVE_CA_CERT_PATH, 1);
 
     // Get a key from the slave node
-    result = GET_KEY(TEST_SKME_HOSTNAME, TEST_MASTER_SAE, &request, &container);  
+    result = GET_KEY(TEST_SKME_HOSTNAME, TEST_MASTER_SAE, &request, &container);
 
     // Store first key ID for next test
     saved_key_id = strdup(container.keys[0].key_ID);
@@ -171,9 +167,9 @@ static void test_get_key(void) {
 
     key_id.key_ID = saved_key_id;
     key_ids.key_IDs = &key_id;
-    
+
     result = GET_KEY_WITH_IDS(TEST_SKME_HOSTNAME, TEST_MASTER_SAE, &key_ids,
-                               &container);
+                              &container);
 
     setenv("QKD_MASTER_CERT_PATH", MASTER_CERT_PATH, 1);
     setenv("QKD_MASTER_KEY_PATH", MASTER_KEY_PATH, 1);
@@ -181,9 +177,9 @@ static void test_get_key(void) {
 
     assert(result == QKD_STATUS_OK);
     assert(container.key_count == 1);
-    assert(strcmp(saved_key,container.keys[0].key) == 0);
-    #endif // not QKD_USE_ETSI014_BACKEND
-    
+    assert(strcmp(saved_key, container.keys[0].key) == 0);
+#endif // not QKD_USE_ETSI014_BACKEND
+
     printf("  Key retrieval by ID: PASS\n");
 
     // Cleanup

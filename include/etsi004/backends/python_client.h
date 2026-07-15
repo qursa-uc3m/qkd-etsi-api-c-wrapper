@@ -10,11 +10,11 @@
  * include/etsi004/backends/python_client.h
  */
 
- #ifndef QKD_ETSI004_BACKENDS_PYTHON_CLIENT_H_
- #define QKD_ETSI004_BACKENDS_PYTHON_CLIENT_H_
- 
- #include "etsi004/api.h"
- 
- extern const struct qkd_004_backend python_client_backend;
- 
- #endif /* QKD_ETSI004_BACKENDS_PYTHON_CLIENT_H_ */
+#ifndef QKD_ETSI004_BACKENDS_PYTHON_CLIENT_H_
+#define QKD_ETSI004_BACKENDS_PYTHON_CLIENT_H_
+
+#include "etsi004/api.h"
+
+extern const struct qkd_004_backend python_client_backend;
+
+#endif /* QKD_ETSI004_BACKENDS_PYTHON_CLIENT_H_ */
