@@ -14,7 +14,7 @@
 #ifndef QKD_ETSI_014_BACKEND_H_
 #define QKD_ETSI_014_BACKEND_H_
 
-#include "qkd_etsi_api.h"
+#include "etsi014/api.h"
 
 #ifdef QKD_USE_ETSI014_BACKEND
 typedef struct {

@@ -8,13 +8,12 @@
  * - Daniel Sobral Blanco (@dasobral) - UC3M
  */
 
-/*
- * src/qkd_etsi014_backend.c
- */
-
 #include <curl/curl.h>
+#include <inttypes.h>
 #include <jansson.h>
-#include <openssl/evp.h>
+#include <limits.h>
+#include <stdbool.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -22,500 +21,446 @@
 #include "debug.h"
 #include "etsi014/api.h"
 #include "etsi014/backends/qkd_etsi014_backend.h"
-#include "qkd_config.h"
 
 #ifdef QKD_USE_ETSI014_BACKEND
 
 #define MAX_KEYS 1024
 #define DEFAULT_KEY_SIZE 256
+#define CONNECT_TIMEOUT_SECONDS 10L
+#define REQUEST_TIMEOUT_SECONDS 30L
+#define MAX_RESPONSE_SIZE (16U * 1024U * 1024U)
 
-// Struct to store responses from cURL
-struct MemoryStruct {
-    char *memory;
+struct memory_buffer {
+    char *data;
     size_t size;
 };
 
-/* New certificate initialization function.
- * role: 1 for initiator (master certs), 0 for responder (slave certs)
- */
-int init_cert_config(int role, etsi014_cert_config_t *config) {
-    if (role == 1) { // initiator: load master certificates
-        const char *cert_path = getenv("QKD_MASTER_CERT_PATH");
-        const char *key_path = getenv("QKD_MASTER_KEY_PATH");
-        const char *ca_cert_path = getenv("QKD_MASTER_CA_CERT_PATH");
+static void cleanup_status(qkd_status_t *status) {
+    free(status->source_KME_ID);
+    free(status->target_KME_ID);
+    free(status->master_SAE_ID);
+    free(status->slave_SAE_ID);
+    memset(status, 0, sizeof(*status));
+}
 
-        if (!cert_path || !key_path || !ca_cert_path) {
-            QKD_DBG_ERR(
-                "Required MASTER certificate environment variables not set");
-            return QKD_STATUS_BAD_REQUEST;
-        }
-        config->cert_path = cert_path;
-        config->key_path = key_path;
-        config->ca_cert_path = ca_cert_path;
-
-        QKD_DBG_INFO("Master certificate configuration initialized:");
-        QKD_DBG_INFO("  Cert path: %s", config->cert_path);
-        QKD_DBG_INFO("  Key path: %s", config->key_path);
-        QKD_DBG_INFO("  CA cert path: %s", config->ca_cert_path);
-    } else { // responder: load slave certificates
-        const char *cert_path = getenv("QKD_SLAVE_CERT_PATH");
-        const char *key_path = getenv("QKD_SLAVE_KEY_PATH");
-        const char *ca_cert_path = getenv("QKD_SLAVE_CA_CERT_PATH");
-
-        if (!cert_path || !key_path || !ca_cert_path) {
-            QKD_DBG_ERR(
-                "Required SLAVE certificate environment variables not set");
-            return QKD_STATUS_BAD_REQUEST;
-        }
-        QKD_DBG_INFO("QKD_SLAVE_CERT_PATH: %s", cert_path);
-        QKD_DBG_INFO("QKD_SLAVE_KEY_PATH: %s", key_path);
-        QKD_DBG_INFO("QKD_SLAVE_CA_CERT_PATH: %s", ca_cert_path);
-
-        config->cert_path = cert_path;
-        config->key_path = key_path;
-        config->ca_cert_path = ca_cert_path;
-
-        QKD_DBG_INFO("Slave certificate configuration initialized.");
+static void cleanup_container(qkd_key_container_t *container) {
+    if (!container)
+        return;
+    for (int32_t i = 0; container->keys && i < container->key_count; i++) {
+        free(container->keys[i].key_ID);
+        free(container->keys[i].key);
     }
+    free(container->keys);
+    memset(container, 0, sizeof(*container));
+}
+
+int init_cert_config(int role, etsi014_cert_config_t *config) {
+    if (!config || (role != 0 && role != 1))
+        return QKD_STATUS_BAD_REQUEST;
+
+    const char *cert_path = role == 1 ? getenv("QKD_MASTER_CERT_PATH")
+                                      : getenv("QKD_SLAVE_CERT_PATH");
+    const char *key_path = role == 1 ? getenv("QKD_MASTER_KEY_PATH")
+                                     : getenv("QKD_SLAVE_KEY_PATH");
+    const char *ca_cert_path = role == 1 ? getenv("QKD_MASTER_CA_CERT_PATH")
+                                         : getenv("QKD_SLAVE_CA_CERT_PATH");
+
+    if (!cert_path || !key_path || !ca_cert_path) {
+        QKD_DBG_ERR("Required %s certificate environment variables not set",
+                    role == 1 ? "QKD_MASTER" : "QKD_SLAVE");
+        return QKD_STATUS_BAD_REQUEST;
+    }
+
+    config->cert_path = cert_path;
+    config->key_path = key_path;
+    config->ca_cert_path = ca_cert_path;
     return QKD_STATUS_OK;
 }
 
-/**************************************************************************************/
-/********************************* - HELPER FUNCTIONS -
- * *******************************/
-/**************************************************************************************/
-/* Callback to write HTTPs responses to memory */
-static size_t WriteMemoryCallback(void *contents, size_t size, size_t nmemb,
-                                  void *userp) {
-    size_t realsize = size * nmemb;
-    struct MemoryStruct *mem = (struct MemoryStruct *)userp;
+static size_t write_memory_callback(void *contents, size_t size, size_t nmemb,
+                                    void *user_data) {
+    struct memory_buffer *buffer = user_data;
 
-    char *ptr = realloc(mem->memory, mem->size + realsize + 1);
-    if (ptr == NULL) {
-        QKD_DBG_ERR("There is not enough memory");
+    if (nmemb != 0 && size > SIZE_MAX / nmemb)
         return 0;
-    }
+    size_t received = size * nmemb;
+    if (received > SIZE_MAX - buffer->size - 1U)
+        return 0;
+    if (received > MAX_RESPONSE_SIZE - buffer->size)
+        return 0;
 
-    mem->memory = ptr;
-    memcpy(&(mem->memory[mem->size]), contents, realsize);
-    mem->size += realsize;
-    mem->memory[mem->size] = 0;
+    char *new_data = realloc(buffer->data, buffer->size + received + 1U);
+    if (!new_data)
+        return 0;
 
-    return realsize;
+    buffer->data = new_data;
+    memcpy(buffer->data + buffer->size, contents, received);
+    buffer->size += received;
+    buffer->data[buffer->size] = '\0';
+    return received;
 }
 
-/* Function to parse HTTP STATUS JSON responses */
-int parse_response_to_qkd_status(const char *response, qkd_status_t *status) {
-    json_t *root;
-    json_error_t error;
+static bool get_json_int32(json_t *root, const char *name, int32_t *value) {
+    json_t *field = json_object_get(root, name);
+    if (!json_is_integer(field))
+        return false;
 
-    // Load JSON from string
-    root = json_loads(response, 0, &error);
-    if (!root) {
-        QKD_DBG_ERR("Error parsing JSON: %s", error.text);
+    json_int_t integer = json_integer_value(field);
+    if (integer < INT32_MIN || integer > INT32_MAX)
+        return false;
+    *value = (int32_t)integer;
+    return true;
+}
+
+static char *duplicate_json_string(json_t *root, const char *name) {
+    json_t *field = json_object_get(root, name);
+    return json_is_string(field) ? strdup(json_string_value(field)) : NULL;
+}
+
+int parse_response_to_qkd_status(const char *response, qkd_status_t *status) {
+    if (!response || !status)
+        return -1;
+
+    json_error_t error;
+    json_t *root = json_loads(response, JSON_REJECT_DUPLICATES, &error);
+    if (!json_is_object(root)) {
+        QKD_DBG_ERR("Error parsing status JSON: %s", error.text);
+        json_decref(root);
         return -1;
     }
 
-    // Assign JSON numerical values to struct
-    status->key_size = json_integer_value(json_object_get(root, "key_size"));
-    status->stored_key_count =
-        json_integer_value(json_object_get(root, "stored_key_count"));
-    status->max_key_count =
-        json_integer_value(json_object_get(root, "max_key_count"));
-    status->max_key_per_request =
-        json_integer_value(json_object_get(root, "max_key_per_request"));
-    status->max_key_size =
-        json_integer_value(json_object_get(root, "max_key_size"));
-    status->min_key_size =
-        json_integer_value(json_object_get(root, "min_key_size"));
-    status->max_SAE_ID_count =
-        json_integer_value(json_object_get(root, "max_SAE_ID_count"));
+    qkd_status_t parsed = {0};
+    bool valid =
+        get_json_int32(root, "key_size", &parsed.key_size) &&
+        get_json_int32(root, "stored_key_count", &parsed.stored_key_count) &&
+        get_json_int32(root, "max_key_count", &parsed.max_key_count) &&
+        get_json_int32(root, "max_key_per_request",
+                       &parsed.max_key_per_request) &&
+        get_json_int32(root, "max_key_size", &parsed.max_key_size) &&
+        get_json_int32(root, "min_key_size", &parsed.min_key_size) &&
+        get_json_int32(root, "max_SAE_ID_count", &parsed.max_SAE_ID_count);
 
-    // Assign strings
-    const char *source_KME_ID =
-        json_string_value(json_object_get(root, "source_KME_ID"));
-    const char *target_KME_ID =
-        json_string_value(json_object_get(root, "target_KME_ID"));
-    const char *master_SAE_ID =
-        json_string_value(json_object_get(root, "master_SAE_ID"));
-    const char *slave_SAE_ID =
-        json_string_value(json_object_get(root, "slave_SAE_ID"));
-
-    // Copy strings to struct
-    status->source_KME_ID = source_KME_ID ? strdup(source_KME_ID) : NULL;
-    status->target_KME_ID = target_KME_ID ? strdup(target_KME_ID) : NULL;
-    status->master_SAE_ID = master_SAE_ID ? strdup(master_SAE_ID) : NULL;
-    status->slave_SAE_ID = slave_SAE_ID ? strdup(slave_SAE_ID) : NULL;
+    parsed.source_KME_ID = duplicate_json_string(root, "source_KME_ID");
+    parsed.target_KME_ID = duplicate_json_string(root, "target_KME_ID");
+    parsed.master_SAE_ID = duplicate_json_string(root, "master_SAE_ID");
+    parsed.slave_SAE_ID = duplicate_json_string(root, "slave_SAE_ID");
+    valid = valid && parsed.source_KME_ID && parsed.target_KME_ID &&
+            parsed.master_SAE_ID && parsed.slave_SAE_ID;
 
     json_decref(root);
+    if (!valid) {
+        cleanup_status(&parsed);
+        return -1;
+    }
+
+    *status = parsed;
     return 0;
 }
 
-/* Function to parse HTTP GET_KEY & GET_KEY_WITH_IDS JSON responses */
 int parse_response_to_qkd_keys(const char *response,
-                               qkd_key_container_t *key_container) {
-    json_t *root;
+                               qkd_key_container_t *container) {
+    if (!response || !container)
+        return -1;
+
     json_error_t error;
-
-    // Load JSON from string
-    root = json_loads(response, 0, &error);
-    if (!root) {
-        QKD_DBG_ERR("Error parsing JSON: %s", error.text);
+    json_t *root = json_loads(response, JSON_REJECT_DUPLICATES, &error);
+    if (!json_is_object(root)) {
+        QKD_DBG_ERR("Error parsing keys JSON: %s", error.text);
+        json_decref(root);
         return -1;
     }
 
-    // Obtain array with the keys
     json_t *keys = json_object_get(root, "keys");
-    if (!json_is_array(keys)) {
-        QKD_DBG_ERR("Error: 'keys' is not a valid JSON array");
+    size_t key_count = json_is_array(keys) ? json_array_size(keys) : 0;
+    if (!json_is_array(keys) || key_count == 0 || key_count > MAX_KEYS ||
+        key_count > INT32_MAX) {
         json_decref(root);
         return -1;
     }
 
-    // Obtain the count of keys
-    size_t key_count = json_array_size(keys);
-    key_container->key_count = key_count;
-    key_container->keys = malloc(key_count * sizeof(qkd_key_t));
-
-    if (!key_container->keys) {
-        QKD_DBG_ERR("Error allocating memory for keys");
+    qkd_key_container_t parsed = {0};
+    parsed.keys = calloc(key_count, sizeof(*parsed.keys));
+    parsed.key_count = (int32_t)key_count;
+    if (!parsed.keys) {
         json_decref(root);
         return -1;
     }
 
-    // Extract each key from the array
     for (size_t i = 0; i < key_count; i++) {
         json_t *key_data = json_array_get(keys, i);
-        if (!json_is_object(key_data)) {
-            QKD_DBG_ERR("Error: Invalid key object at index %zu", i);
-            continue;
+        parsed.keys[i].key_ID = duplicate_json_string(key_data, "key_ID");
+        parsed.keys[i].key = duplicate_json_string(key_data, "key");
+        if (!parsed.keys[i].key_ID || !parsed.keys[i].key) {
+            json_decref(root);
+            cleanup_container(&parsed);
+            return -1;
         }
-
-        // Obtain key_ID and key
-        json_t *key_id = json_object_get(key_data, "key_ID");
-        json_t *key = json_object_get(key_data, "key");
-
-        if (!json_is_string(key_id) || !json_is_string(key)) {
-            QKD_DBG_ERR("Error: Invalid key or key_ID at index %zu", i);
-            continue;
-        }
-
-        // Assing values to struct qkd_key
-        key_container->keys[i].key_ID = strdup(json_string_value(key_id));
-        key_container->keys[i].key = strdup(json_string_value(key));
-        key_container->keys[i].key_ID_extension =
-            NULL; // Opcional, inicializado a NULL
-        key_container->keys[i].key_extension =
-            NULL; // Opcional, inicializado a NULL
     }
 
     json_decref(root);
+    *container = parsed;
     return 0;
 }
 
-#ifdef QKD_USE_QUKAYDEE
-/**************************************************************************************/
-/***************** MODIFIED FUNCTIONS (only used with QKD_BACKEND="qukaydee")
- * *********/
-/**************************************************************************************/
-
-/* Modified function to create a JSON with multiple keys for POST request.
- * This version includes an extra "master_SAE_ID" field in each entry.
- */
-static char *build_post_data(qkd_key_ids_t *key_ids,
+static char *build_post_data(const qkd_key_ids_t *key_ids,
                              const char *master_sae_id) {
-    size_t buffer_size = 1024;
-    char *post_data = calloc(buffer_size, sizeof(char));
-    if (!post_data) {
+    json_t *root = json_object();
+    json_t *ids = json_array();
+    if (!root || !ids) {
+        json_decref(root);
+        json_decref(ids);
         return NULL;
     }
-    strcat(post_data, "{\"key_IDs\":[");
-    for (int i = 0; i < key_ids->key_ID_count; ++i) {
-        char key_id_entry[256];
-        snprintf(key_id_entry, sizeof(key_id_entry),
-                 "{\"key_ID\":\"%s\",\"master_SAE_ID\":\"%s\"}",
-                 key_ids->key_IDs[i].key_ID, master_sae_id);
-        strcat(post_data, key_id_entry);
-        if (i < key_ids->key_ID_count - 1) {
-            strcat(post_data, ",");
-        }
-    }
-    strcat(post_data, "]}");
-    return post_data;
-}
 
-/* Modified HTTPS request handler that sets JSON HTTP headers */
-static char *handle_request_https(const char *url, const char *post_data,
-                                  long *http_code,
-                                  etsi014_cert_config_t *cert_config) {
-    CURL *curl;
-    CURLcode res;
-    struct MemoryStruct chunk;
-
-    chunk.memory = malloc(1);
-    if (!chunk.memory) {
-        return NULL;
-    }
-    chunk.size = 0;
-
-    curl = curl_easy_init();
-    if (curl) {
-        curl_easy_setopt(curl, CURLOPT_URL, url);
-        curl_easy_setopt(curl, CURLOPT_SSLCERT, cert_config->cert_path);
-        curl_easy_setopt(curl, CURLOPT_SSLKEY, cert_config->key_path);
-        curl_easy_setopt(curl, CURLOPT_CAINFO, cert_config->ca_cert_path);
-        curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, WriteMemoryCallback);
-        curl_easy_setopt(curl, CURLOPT_WRITEDATA, (void *)&chunk);
-
-        /* Disable hostname verification (but still verify CA signatures) */
-        curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 0L);
-
-        /* Set HTTP headers for JSON */
-        struct curl_slist *headers = NULL;
-        headers = curl_slist_append(headers, "Accept: application/json");
-        headers = curl_slist_append(headers, "Content-Type: application/json");
-        curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
-
-        if (post_data != NULL) {
-            curl_easy_setopt(curl, CURLOPT_POSTFIELDS, post_data);
+    for (int32_t i = 0; i < key_ids->key_ID_count; i++) {
+        if (!key_ids->key_IDs[i].key_ID) {
+            json_decref(root);
+            json_decref(ids);
+            return NULL;
         }
 
-        res = curl_easy_perform(curl);
-
-        if (res != CURLE_OK) {
-            QKD_DBG_ERR("Error in curl_easy_perform(): %s",
-                        curl_easy_strerror(res));
-            free(chunk.memory);
-            chunk.memory = NULL;
-        } else {
-            /* Retrieve the HTTP response code */
-            curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, http_code);
+        json_t *entry = json_object();
+        if (!entry ||
+            json_object_set_new(entry, "key_ID",
+                                json_string(key_ids->key_IDs[i].key_ID)) != 0) {
+            json_decref(entry);
+            json_decref(root);
+            json_decref(ids);
+            return NULL;
         }
-        curl_slist_free_all(headers);
-        curl_easy_cleanup(curl);
-    }
-    return chunk.memory;
-}
+#ifdef QKD_USE_QUKAYDEE
+        if (json_object_set_new(entry, "master_SAE_ID",
+                                json_string(master_sae_id)) != 0) {
+            json_decref(entry);
+            json_decref(root);
+            json_decref(ids);
+            return NULL;
+        }
 #else
-/**************************************************************************************/
-/*********************** ORIGINAL FUNCTIONS (for non-qukaydee)
- * ************************/
-/**************************************************************************************/
-/* Original function to create a JSON with multiple keys for POST request */
-static char *build_post_data(qkd_key_ids_t *key_ids) {
-    size_t buffer_size = 1024;
-    char *post_data = calloc(buffer_size, sizeof(char));
-    if (!post_data) {
+        (void)master_sae_id;
+#endif
+        if (json_array_append(ids, entry) != 0) {
+            json_decref(entry);
+            json_decref(root);
+            json_decref(ids);
+            return NULL;
+        }
+        json_decref(entry);
+    }
+
+    if (json_object_set(root, "key_IDs", ids) != 0) {
+        json_decref(root);
+        json_decref(ids);
         return NULL;
     }
-    strcat(post_data, "{\"key_IDs\":[");
-    for (int i = 0; i < key_ids->key_ID_count; ++i) {
-        char key_id_entry[128];
-        snprintf(key_id_entry, sizeof(key_id_entry), "{\"key_ID\":\"%s\"}",
-                 key_ids->key_IDs[i].key_ID);
-        strcat(post_data, key_id_entry);
-        if (i < key_ids->key_ID_count - 1) {
-            strcat(post_data, ",");
-        }
-    }
-    strcat(post_data, "]}");
+    json_decref(ids);
+
+    char *post_data = json_dumps(root, JSON_COMPACT);
+    json_decref(root);
     return post_data;
 }
 
-/* Handle to commit HTTPs requests */
-static char *handle_request_https(const char *url, const char *post_data,
-                                  long *http_code,
-                                  etsi014_cert_config_t *cert_config) {
-    CURL *curl;
-    CURLcode res;
-    struct MemoryStruct chunk;
+static char *build_url(const char *hostname, const char *sae_id,
+                       const char *suffix) {
+    if (strncmp(hostname, "https://", sizeof("https://") - 1U) != 0)
+        return NULL;
 
-    chunk.memory = malloc(1);
-    if (!chunk.memory) {
+    CURL *curl = curl_easy_init();
+    if (!curl)
+        return NULL;
+    char *escaped_id = curl_easy_escape(curl, sae_id, 0);
+    if (!escaped_id) {
+        curl_easy_cleanup(curl);
         return NULL;
     }
-    chunk.size = 0;
 
-    curl = curl_easy_init();
-    if (curl) {
-        curl_easy_setopt(curl, CURLOPT_URL, url);
-        curl_easy_setopt(curl, CURLOPT_HTTP_VERSION,
-                         CURL_HTTP_VERSION_1_1); // Force HTTP/1.1
-        curl_easy_setopt(curl, CURLOPT_SSLCERT, cert_config->cert_path);
-        curl_easy_setopt(curl, CURLOPT_SSLKEY, cert_config->key_path);
-        curl_easy_setopt(curl, CURLOPT_CAINFO, cert_config->ca_cert_path);
-        curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, WriteMemoryCallback);
-        curl_easy_setopt(curl, CURLOPT_WRITEDATA, (void *)&chunk);
+    int length =
+        snprintf(NULL, 0, "%s/api/v1/keys/%s/%s", hostname, escaped_id, suffix);
+    if (length < 0) {
+        curl_free(escaped_id);
+        curl_easy_cleanup(curl);
+        return NULL;
+    }
 
-        /* Disable hostname verification (but still verify CA signatures) */
-        curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 0L);
+    char *url = malloc((size_t)length + 1U);
+    if (url)
+        snprintf(url, (size_t)length + 1U, "%s/api/v1/keys/%s/%s", hostname,
+                 escaped_id, suffix);
+    curl_free(escaped_id);
+    curl_easy_cleanup(curl);
+    return url;
+}
 
-        /* Set HTTP headers for JSON */
-        struct curl_slist *headers = NULL;
-        headers = curl_slist_append(headers, "Accept: application/json");
-        headers = curl_slist_append(headers, "Content-Type: application/json");
-        curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
+static char *handle_request_https(const char *url, const char *post_data,
+                                  long *http_code,
+                                  const etsi014_cert_config_t *cert_config) {
+    if (!url || !http_code || !cert_config)
+        return NULL;
 
-        if (post_data != NULL) {
-            curl_easy_setopt(curl, CURLOPT_POSTFIELDS, post_data);
-        }
+    *http_code = 0;
+    struct memory_buffer response = {.data = malloc(1), .size = 0};
+    if (!response.data)
+        return NULL;
+    response.data[0] = '\0';
 
-        res = curl_easy_perform(curl);
+    CURL *curl = curl_easy_init();
+    if (!curl) {
+        free(response.data);
+        return NULL;
+    }
 
-        if (res != CURLE_OK) {
-            QKD_DBG_ERR("Error in curl_easy_perform(): %s",
-                        curl_easy_strerror(res));
-            free(chunk.memory);
-            chunk.memory = NULL;
-        } else {
-            /* Retrieve the HTTP response code */
-            curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, http_code);
-        }
+    struct curl_slist *headers =
+        curl_slist_append(NULL, "Accept: application/json");
+    struct curl_slist *new_headers =
+        curl_slist_append(headers, "Content-Type: application/json");
+    if (!headers || !new_headers) {
         curl_slist_free_all(headers);
         curl_easy_cleanup(curl);
+        free(response.data);
+        return NULL;
     }
-    return chunk.memory;
-}
-#endif /* QKD_USE_QUKAYDEE */
+    headers = new_headers;
 
-/* Handle to manage HTTP responses with keys*/
-static uint32_t handle_http_response(const char *response, long http_code,
+    curl_easy_setopt(curl, CURLOPT_URL, url);
+    curl_easy_setopt(curl, CURLOPT_HTTP_VERSION, CURL_HTTP_VERSION_1_1);
+    curl_easy_setopt(curl, CURLOPT_SSLCERT, cert_config->cert_path);
+    curl_easy_setopt(curl, CURLOPT_SSLKEY, cert_config->key_path);
+    curl_easy_setopt(curl, CURLOPT_CAINFO, cert_config->ca_cert_path);
+    curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 1L);
+    curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 2L);
+    curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, CONNECT_TIMEOUT_SECONDS);
+    curl_easy_setopt(curl, CURLOPT_TIMEOUT, REQUEST_TIMEOUT_SECONDS);
+    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_memory_callback);
+    curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response);
+    curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
+    if (post_data)
+        curl_easy_setopt(curl, CURLOPT_POSTFIELDS, post_data);
+
+    CURLcode result = curl_easy_perform(curl);
+    if (result == CURLE_OK)
+        result = curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, http_code);
+
+    curl_slist_free_all(headers);
+    curl_easy_cleanup(curl);
+    if (result != CURLE_OK) {
+        QKD_DBG_ERR("HTTPS request failed: %s", curl_easy_strerror(result));
+        free(response.data);
+        return NULL;
+    }
+    return response.data;
+}
+
+static uint32_t map_http_error(long http_code) {
+    if (http_code == QKD_STATUS_UNAUTHORIZED)
+        return QKD_STATUS_UNAUTHORIZED;
+    if (http_code >= 400 && http_code < 500)
+        return QKD_STATUS_BAD_REQUEST;
+    return QKD_STATUS_SERVER_ERROR;
+}
+
+static uint32_t handle_keys_response(char *response, long http_code,
                                      qkd_key_container_t *container) {
-    if (response && http_code < 400) {
-        if (parse_response_to_qkd_keys(response, container) == 0) {
-            QKD_DBG_INFO("[HTTP_RESPONSE_HANDLER] - JSON parsed successfully.");
-            free((void *)response);
-            return QKD_STATUS_OK;
-        } else {
-            QKD_DBG_ERR("[HTTP_RESPONSE_HANDLER] - Error parsing JSON.");
-            free((void *)response);
-            return QKD_STATUS_BAD_REQUEST;
-        }
-    } else {
-        QKD_DBG_ERR("[HTTP_RESPONSE_HANDLER] - HTTP request failed.");
-        if (response) {
-            free((void *)response);
-        }
-        return (http_code < 500) ? QKD_STATUS_BAD_REQUEST
-                                 : QKD_STATUS_SERVER_ERROR;
+    if (!response)
+        return QKD_STATUS_SERVER_ERROR;
+    if (http_code < 200 || http_code >= 300) {
+        free(response);
+        return map_http_error(http_code);
     }
+
+    int parsed = parse_response_to_qkd_keys(response, container);
+    free(response);
+    return parsed == 0 ? QKD_STATUS_OK : QKD_STATUS_BAD_REQUEST;
 }
 
-/**************************************************************************************/
-/****************************** - BACKEND IMPLEMENTATION -
- * ****************************/
-/**************************************************************************************/
 static uint32_t get_status(const char *kme_hostname, const char *slave_sae_id,
                            qkd_status_t *status) {
-    char url[256];
-    char *response;
-    long http_code;
-
-    etsi014_cert_config_t cert_config;
-
-    if (init_cert_config(1, &cert_config) != QKD_STATUS_OK)
+    etsi014_cert_config_t config;
+    if (init_cert_config(1, &config) != QKD_STATUS_OK)
         return QKD_STATUS_BAD_REQUEST;
 
-    // Request to KME node
-    snprintf(url, sizeof(url), "%s/api/v1/keys/%s/status", kme_hostname,
-             slave_sae_id);
-    response = handle_request_https(url, NULL, &http_code, &cert_config);
-    QKD_DBG_INFO("[GET_STATUS] - HTTP RSP Code: %ld", http_code);
-    if (response && http_code < 400) {
-        // puts(response); // Show JSON for debugging.
-
-        if (parse_response_to_qkd_status(response, status) == 0) {
-            QKD_DBG_INFO("[GET_STATUS] - Status JSON parsed.");
-        } else {
-            QKD_DBG_ERR("[GET_STATUS] - Error parsing Status JSON.");
-        }
-
-        free(response); // Free memory response JSON
-        return QKD_STATUS_OK;
-    }
-
-    // Free response memory in case of error
-    if (response) {
-        free(response);
-    }
-
-    // Manejo de errores según el código HTTP
-    if (http_code < 500) {
-        return QKD_STATUS_BAD_REQUEST;
-    } else {
+    char *url = build_url(kme_hostname, slave_sae_id, "status");
+    if (!url)
         return QKD_STATUS_SERVER_ERROR;
+
+    long http_code;
+    char *response = handle_request_https(url, NULL, &http_code, &config);
+    free(url);
+    if (!response)
+        return QKD_STATUS_SERVER_ERROR;
+    if (http_code < 200 || http_code >= 300) {
+        free(response);
+        return map_http_error(http_code);
     }
+
+    int parsed = parse_response_to_qkd_status(response, status);
+    free(response);
+    return parsed == 0 ? QKD_STATUS_OK : QKD_STATUS_BAD_REQUEST;
 }
 
 static uint32_t get_key(const char *kme_hostname, const char *slave_sae_id,
                         qkd_key_request_t *request,
                         qkd_key_container_t *container) {
+    if (request && (request->number < 0 || request->size < 0))
+        return QKD_STATUS_BAD_REQUEST;
+    int32_t number = request && request->number > 0 ? request->number : 1;
+    int32_t size =
+        request && request->size > 0 ? request->size : DEFAULT_KEY_SIZE;
+    if (number <= 0 || number > MAX_KEYS || size <= 0)
+        return QKD_STATUS_BAD_REQUEST;
 
-    if (!kme_hostname) {
-        QKD_DBG_ERR("get_key: kme_hostname is NULL");
+    char suffix[96];
+    int suffix_length =
+        snprintf(suffix, sizeof(suffix),
+                 "enc_keys?number=%" PRId32 "&size=%" PRId32, number, size);
+    if (suffix_length < 0 || (size_t)suffix_length >= sizeof(suffix))
+        return QKD_STATUS_BAD_REQUEST;
+
+    char *url = build_url(kme_hostname, slave_sae_id, suffix);
+    if (!url)
+        return QKD_STATUS_SERVER_ERROR;
+
+    etsi014_cert_config_t config;
+    if (init_cert_config(1, &config) != QKD_STATUS_OK) {
+        free(url);
         return QKD_STATUS_BAD_REQUEST;
     }
-    if (!slave_sae_id) {
-        QKD_DBG_ERR("get_key: slave_sae_id is NULL");
-        return QKD_STATUS_BAD_REQUEST;
-    }
-    if (!container) {
-        QKD_DBG_ERR("get_key: container pointer is NULL");
-        return QKD_STATUS_BAD_REQUEST;
-    }
 
-    int num_keys = request ? request->number : 1;
-    int size_keys = DEFAULT_KEY_SIZE;
-
-    container->keys = calloc(num_keys, sizeof(qkd_key_t));
-    container->key_count = num_keys;
-
-    char url[256];
-    snprintf(url, sizeof(url), "%s/api/v1/keys/%s/enc_keys?number=%d&size=%d",
-             kme_hostname, slave_sae_id, num_keys, size_keys);
-
-    char *response;
     long http_code;
-    etsi014_cert_config_t cert_config;
-    if (init_cert_config(1, &cert_config) != QKD_STATUS_OK)
-        return QKD_STATUS_BAD_REQUEST;
-
-    response = handle_request_https(url, NULL, &http_code, &cert_config);
-    return handle_http_response(response, http_code, container);
+    char *response = handle_request_https(url, NULL, &http_code, &config);
+    free(url);
+    return handle_keys_response(response, http_code, container);
 }
 
 static uint32_t get_key_with_ids(const char *kme_hostname,
                                  const char *master_sae_id,
                                  qkd_key_ids_t *key_ids,
                                  qkd_key_container_t *container) {
-    char url[256];
-    snprintf(url, sizeof(url), "%s/api/v1/keys/%s/dec_keys", kme_hostname,
-             master_sae_id);
+    if (key_ids->key_ID_count <= 0 || key_ids->key_ID_count > MAX_KEYS ||
+        !key_ids->key_IDs)
+        return QKD_STATUS_BAD_REQUEST;
 
-#ifdef QKD_USE_QUKAYDEE
+    char *url = build_url(kme_hostname, master_sae_id, "dec_keys");
     char *post_data = build_post_data(key_ids, master_sae_id);
-#else
-    char *post_data = build_post_data(key_ids);
-#endif
-
-    QKD_DBG_VERB("POST DATA: %s", post_data);
-
-    char *response;
-    long http_code;
-    etsi014_cert_config_t cert_config;
-    if (init_cert_config(0, &cert_config) != QKD_STATUS_OK) {
+    if (!url || !post_data) {
+        free(url);
         free(post_data);
         return QKD_STATUS_BAD_REQUEST;
     }
 
-    QKD_DBG_VERB("Request URI: %s", url);
+    etsi014_cert_config_t config;
+    if (init_cert_config(0, &config) != QKD_STATUS_OK) {
+        free(url);
+        free(post_data);
+        return QKD_STATUS_BAD_REQUEST;
+    }
 
-    response = handle_request_https(url, post_data, &http_code, &cert_config);
+    long http_code;
+    char *response = handle_request_https(url, post_data, &http_code, &config);
+    free(url);
     free(post_data);
-    return handle_http_response(response, http_code, container);
+    return handle_keys_response(response, http_code, container);
 }
 
-/* Register backend */
 const struct qkd_014_backend qkd_etsi014_backend = {
     .name = "qkd_etsi014_backend",
     .get_status = get_status,
