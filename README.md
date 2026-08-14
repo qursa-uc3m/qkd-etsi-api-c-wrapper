@@ -96,6 +96,12 @@ export QKD_SLAVE_CA_CERT_PATH=/path/to/slave-ca.pem
 ETSI 014 response strings and keys are allocated by the wrapper. Release them
 with `qkd_status_free()` and `qkd_key_container_free()`.
 
+ETSI GS QKD 014 V1.1.1 uses `Keys` in table 11 but `keys` in its JSON example.
+For HEQA Sceptre Link compatibility, the HTTPS backend accepts either spelling
+and rejects responses containing both. Other field names remain case-sensitive.
+Thanks to [@alpatron](https://github.com/alpatron) for reporting
+[issue #3](https://github.com/qursa-uc3m/qkd-etsi-api-c-wrapper/issues/3).
+
 ### Other Options
 
 - `QKD_DEBUG_LEVEL`: Set debug verbosity from 0 (disabled) to 4 (maximum). Default: 0
