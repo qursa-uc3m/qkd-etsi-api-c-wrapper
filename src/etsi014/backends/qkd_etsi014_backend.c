@@ -22,6 +22,7 @@
 #include "debug.h"
 #include "etsi014/api.h"
 #include "etsi014/backends/qkd_etsi014_backend.h"
+#include "qkd_etsi014_backend_internal.h"
 
 #ifdef QKD_USE_ETSI014_BACKEND
 
@@ -97,6 +98,21 @@ static bool get_json_int32(json_t *root, const char *name, int32_t *value) {
 static char *duplicate_json_string(json_t *root, const char *name) {
     json_t *field = json_object_get(root, name);
     return json_is_string(field) ? strdup(json_string_value(field)) : NULL;
+}
+
+static json_t *get_key_container_keys(json_t *root) {
+    json_t *keys = json_object_get(root, "keys");
+    json_t *capitalized_keys = json_object_get(root, "Keys");
+
+    if (keys && capitalized_keys) {
+        QKD_DBG_ERR("Ambiguous key container: both keys and Keys are present");
+        return NULL;
+    }
+    if (capitalized_keys) {
+        QKD_DBG_WARN(
+            "Accepting capitalized Keys field for ETSI 014 compatibility");
+    }
+    return keys ? keys : capitalized_keys;
 }
 
 static bool is_uuid_string(const char *value) {
@@ -202,7 +218,7 @@ int parse_response_to_qkd_keys(const char *response,
         return -1;
     }
 
-    json_t *keys = json_object_get(root, "keys");
+    json_t *keys = get_key_container_keys(root);
     size_t key_count = json_is_array(keys) ? json_array_size(keys) : 0;
     if (!json_is_array(keys) || key_count == 0 || key_count > MAX_KEYS ||
         key_count > INT32_MAX) {

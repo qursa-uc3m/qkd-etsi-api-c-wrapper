@@ -300,6 +300,21 @@ if(BUILD_TESTS)
             ${ETSI014_TARGET}
         )
         add_test(NAME etsi014_test COMMAND etsi014_test)
+
+        if(ENABLE_ETSI014_BACKEND)
+            add_executable(etsi014_parser_test
+                tests/etsi014/parser_test.c
+            )
+            target_include_directories(etsi014_parser_test
+                PRIVATE
+                ${CMAKE_CURRENT_SOURCE_DIR}/src/etsi014/backends
+            )
+            target_link_libraries(etsi014_parser_test
+                PRIVATE
+                ${ETSI014_TARGET}
+            )
+            add_test(NAME etsi014_parser_test COMMAND etsi014_parser_test)
+        endif()
         
         if(NOT QKD_BACKEND STREQUAL "simulated")
             # Full test only for ETSI014 with non-simulated backends
