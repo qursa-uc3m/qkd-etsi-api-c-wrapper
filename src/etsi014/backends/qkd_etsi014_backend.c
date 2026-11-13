@@ -13,6 +13,7 @@
 #include <inttypes.h>
 #include <jansson.h>
 #include <limits.h>
+#include <openssl/crypto.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -71,15 +72,27 @@ static size_t write_memory_callback(void *contents, size_t size, size_t nmemb,
     if (received > MAX_RESPONSE_SIZE - buffer->size)
         return 0;
 
-    char *new_data = realloc(buffer->data, buffer->size + received + 1U);
+    // Grow by hand rather than with realloc() so that no copy of the key
+    // material is left behind unwiped.
+    char *new_data = malloc(buffer->size + received + 1U);
     if (!new_data)
         return 0;
+    memcpy(new_data, buffer->data, buffer->size);
+    OPENSSL_cleanse(buffer->data, buffer->size);
+    free(buffer->data);
 
     buffer->data = new_data;
     memcpy(buffer->data + buffer->size, contents, received);
     buffer->size += received;
     buffer->data[buffer->size] = '\0';
     return received;
+}
+
+static void free_response(char *response) {
+    if (!response)
+        return;
+    OPENSSL_cleanse(response, strlen(response));
+    free(response);
 }
 
 static bool get_json_int32(json_t *root, const char *name, int32_t *value) {
@@ -394,7 +407,7 @@ static char *handle_request_https(const char *url, const char *post_data,
     curl_easy_cleanup(curl);
     if (result != CURLE_OK) {
         QKD_DBG_ERR("HTTPS request failed: %s", curl_easy_strerror(result));
-        free(response.data);
+        free_response(response.data);
         return NULL;
     }
     return response.data;
@@ -413,12 +426,12 @@ static uint32_t handle_keys_response(char *response, long http_code,
     if (!response)
         return QKD_STATUS_SERVER_ERROR;
     if (http_code < 200 || http_code >= 300) {
-        free(response);
+        free_response(response);
         return map_http_error(http_code);
     }
 
     int parsed = parse_response_to_qkd_keys(response, container);
-    free(response);
+    free_response(response);
     return parsed == 0 ? QKD_STATUS_OK : QKD_STATUS_SERVER_ERROR;
 }
 
