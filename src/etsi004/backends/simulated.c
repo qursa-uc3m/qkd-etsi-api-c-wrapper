@@ -13,6 +13,7 @@
 #include <inttypes.h>
 #include <openssl/evp.h>
 #include <openssl/rand.h>
+#include <pthread.h>
 #include <stdio.h>
 #include <string.h>
 #include <time.h>
@@ -46,6 +47,7 @@ static unsigned char closed_streams[MAX_STREAMS][QKD_KSID_SIZE];
 static bool closed_stream_in_use[MAX_STREAMS];
 static size_t next_closed_stream;
 static bool legacy_stream_id_issued;
+static pthread_mutex_t streams_lock = PTHREAD_MUTEX_INITIALIZER;
 
 static uint32_t set_status(uint32_t *status, uint32_t value) {
     if (status)
@@ -336,10 +338,41 @@ static uint32_t sim_close(const unsigned char *key_stream_id,
     return set_status(status, QKD_STATUS_SUCCESS);
 }
 
+/* Hosts call in from several threads; the stream table is shared by all. */
+static uint32_t locked_open_connect(const char *source, const char *destination,
+                                    struct qkd_qos_s *qos,
+                                    unsigned char *key_stream_id,
+                                    uint32_t *status) {
+    pthread_mutex_lock(&streams_lock);
+    uint32_t result =
+        sim_open_connect(source, destination, qos, key_stream_id, status);
+    pthread_mutex_unlock(&streams_lock);
+    return result;
+}
+
+static uint32_t locked_get_key(const unsigned char *key_stream_id,
+                               uint32_t *index, unsigned char *key_buffer,
+                               struct qkd_metadata_s *metadata,
+                               uint32_t *status) {
+    pthread_mutex_lock(&streams_lock);
+    uint32_t result =
+        sim_get_key(key_stream_id, index, key_buffer, metadata, status);
+    pthread_mutex_unlock(&streams_lock);
+    return result;
+}
+
+static uint32_t locked_close(const unsigned char *key_stream_id,
+                             uint32_t *status) {
+    pthread_mutex_lock(&streams_lock);
+    uint32_t result = sim_close(key_stream_id, status);
+    pthread_mutex_unlock(&streams_lock);
+    return result;
+}
+
 const struct qkd_004_backend simulated_backend = {.name = "simulated",
                                                   .open_connect =
-                                                      sim_open_connect,
-                                                  .get_key = sim_get_key,
-                                                  .close = sim_close};
+                                                      locked_open_connect,
+                                                  .get_key = locked_get_key,
+                                                  .close = locked_close};
 
 #endif /* QKD_USE_SIMULATED */
