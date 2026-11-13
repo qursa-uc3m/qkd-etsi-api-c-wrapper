@@ -15,8 +15,13 @@
 #define QKD_ETSI_014_BACKEND_H_
 
 #include "etsi014/api.h"
+#include "qkd_config.h"
 
 #ifdef QKD_USE_ETSI014_BACKEND
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 typedef struct {
     const char *cert_path;    // Path to public certificate
     const char *key_path;     // Path to private key
@@ -26,6 +31,10 @@ typedef struct {
 int init_cert_config(int role, etsi014_cert_config_t *config);
 
 extern const struct qkd_014_backend qkd_etsi014_backend;
+
+#ifdef __cplusplus
+}
+#endif
 #endif /* QKD_USE_ETSI014_BACKEND */
 
 #endif /* QKD_ETSI_014_BACKEND_H_ */
