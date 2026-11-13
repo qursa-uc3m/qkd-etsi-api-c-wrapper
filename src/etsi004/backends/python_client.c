@@ -623,15 +623,19 @@ static uint32_t python_client_get_key(const unsigned char *key_stream_id,
         return QKD_STATUS_PEER_NOT_CONNECTED_GET_KEY;
     }
 
-    if (PyTuple_Size(py_get_key_result) < 3 ||
-        !PyLong_Check(PyTuple_GetItem(py_get_key_result, 0))) {
+    // The QUBIP client returns (index, key, metadata, status). Older clients
+    // returned (status, key, metadata).
+    Py_ssize_t result_size = PyTuple_Size(py_get_key_result);
+    Py_ssize_t status_position = result_size == 4 ? 3 : 0;
+    if (result_size < 3 ||
+        !PyLong_Check(PyTuple_GetItem(py_get_key_result, status_position))) {
         Py_DECREF(py_get_key_result);
         *status = QKD_STATUS_NO_CONNECTION;
         return QKD_STATUS_NO_CONNECTION;
     }
 
     // Extract status, key_material, and metadata from the result tuple
-    PyObject *py_status = PyTuple_GetItem(py_get_key_result, 0);
+    PyObject *py_status = PyTuple_GetItem(py_get_key_result, status_position);
     uint32_t status_value = QKD_STATUS_NO_CONNECTION;
     python_to_uint32(py_status, &status_value);
 
