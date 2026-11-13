@@ -286,14 +286,21 @@ if(BUILD_TESTS)
     
     # ETSI004 tests - only build if ETSI004 is enabled
     if(ENABLE_ETSI004)
+        if(QKD_BACKEND STREQUAL "python_client")
+            # Needs a running QUBIP server, skipped when it is not configured
+            set(ETSI004_TEST_SOURCE tests/etsi004/python_client_test.c)
+        else()
+            set(ETSI004_TEST_SOURCE tests/etsi004/api_test.c)
+        endif()
         add_executable(etsi004_test
-            tests/etsi004/api_test.c
+            ${ETSI004_TEST_SOURCE}
         )
         target_link_libraries(etsi004_test
             PRIVATE
             ${ETSI004_TARGET}
         )
         add_test(NAME etsi004_test COMMAND etsi004_test)
+        set_tests_properties(etsi004_test PROPERTIES SKIP_RETURN_CODE 77)
     endif()
     
     # ETSI014 tests - only build if ETSI014 is enabled
