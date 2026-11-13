@@ -22,7 +22,6 @@
 static PyObject *py_qkd_client_module = NULL;
 static PyObject *py_qkd_client_class = NULL;
 static PyObject *py_qkd_client_instance = NULL;
-static bool owns_python_interpreter = false;
 
 // Helper functions for Python integration
 static bool initialize_python(void);
@@ -45,32 +44,19 @@ static uint32_t python_client_get_key(const unsigned char *key_stream_id,
 static uint32_t python_client_close(const unsigned char *key_stream_id,
                                     uint32_t *status);
 
-static void finalize_owned_python(void) {
-    if (owns_python_interpreter && Py_IsInitialized())
-        Py_Finalize();
-    owns_python_interpreter = false;
+static uint32_t no_connection(uint32_t *status) {
+    if (status)
+        *status = QKD_STATUS_NO_CONNECTION;
+    return QKD_STATUS_NO_CONNECTION;
 }
 
-// Initialize the Python interpreter and the QKD client module
-static bool initialize_python(void) {
-    if (py_qkd_client_instance)
-        return true;
-
-    if (!Py_IsInitialized()) {
-        Py_Initialize();
-        owns_python_interpreter = true;
-    }
-    if (!Py_IsInitialized()) {
-        QKD_DBG_ERR("Failed to initialize Python interpreter");
-        return false;
-    }
-
+// Import the QKD client module and create the client instance
+static bool load_client(void) {
     // Import the sys module to manipulate the path
     PyObject *sys_module = PyImport_ImportModule("sys");
     if (!sys_module) {
         PyErr_Print();
         QKD_DBG_ERR("Failed to import sys module");
-        finalize_owned_python();
         return false;
     }
 
@@ -83,7 +69,6 @@ static bool initialize_python(void) {
         Py_XDECREF(path_str);
         Py_XDECREF(sys_path);
         Py_DECREF(sys_module);
-        finalize_owned_python();
         return false;
     }
     Py_DECREF(path_str);
@@ -95,7 +80,6 @@ static bool initialize_python(void) {
     if (!py_qkd_client_module) {
         PyErr_Print();
         QKD_DBG_ERR("Failed to import qkd_client module");
-        finalize_owned_python();
         return false;
     }
 
@@ -109,7 +93,6 @@ static bool initialize_python(void) {
         Py_DECREF(py_qkd_client_module);
         py_qkd_client_class = NULL;
         py_qkd_client_module = NULL;
-        finalize_owned_python();
         return false;
     }
 
@@ -122,11 +105,32 @@ static bool initialize_python(void) {
         Py_DECREF(py_qkd_client_module);
         py_qkd_client_class = NULL;
         py_qkd_client_module = NULL;
-        finalize_owned_python();
         return false;
     }
 
     return true;
+}
+
+// Initialize the Python interpreter and the QKD client module
+static bool initialize_python(void) {
+    if (py_qkd_client_instance)
+        return true;
+
+    if (!Py_IsInitialized()) {
+        Py_Initialize();
+        if (!Py_IsInitialized()) {
+            QKD_DBG_ERR("Failed to initialize Python interpreter");
+            return false;
+        }
+        // Py_Initialize() leaves the GIL held by this thread. Release it so
+        // that every call, from any thread, can take it below.
+        PyEval_SaveThread();
+    }
+
+    PyGILState_STATE gil = PyGILState_Ensure();
+    bool loaded = load_client();
+    PyGILState_Release(gil);
+    return loaded;
 }
 
 static PyObject *uuid_from_bytes(const unsigned char *value) {
@@ -250,23 +254,14 @@ static bool convert_python_to_qos(PyObject *py_qos, struct qkd_qos_s *qos) {
     return true;
 }
 
-// Backend implementation for OPEN_CONNECT
-static uint32_t python_client_open_connect(const char *source,
-                                           const char *destination,
-                                           struct qkd_qos_s *qos,
-                                           unsigned char *key_stream_id,
-                                           uint32_t *status) {
+// Backend implementation for OPEN_CONNECT, called with the GIL held
+static uint32_t open_connect_locked(const char *source, const char *destination,
+                                    struct qkd_qos_s *qos,
+                                    unsigned char *key_stream_id,
+                                    uint32_t *status) {
     if (!source || !destination || !qos || !key_stream_id || !status) {
         if (status)
             *status = QKD_STATUS_NO_CONNECTION;
-        return QKD_STATUS_NO_CONNECTION;
-    }
-
-    // Initialize Python and QKD client if not already done
-    if (!initialize_python()) {
-        if (status) {
-            *status = QKD_STATUS_NO_CONNECTION;
-        }
         return QKD_STATUS_NO_CONNECTION;
     }
 
@@ -541,22 +536,14 @@ static uint32_t python_client_open_connect(const char *source,
     return status_value;
 }
 
-// Backend implementation for GET_KEY
-static uint32_t python_client_get_key(const unsigned char *key_stream_id,
-                                      uint32_t *index,
-                                      unsigned char *key_buffer,
-                                      struct qkd_metadata_s *metadata,
-                                      uint32_t *status) {
+// Backend implementation for GET_KEY, called with the GIL held
+static uint32_t get_key_locked(const unsigned char *key_stream_id,
+                               uint32_t *index, unsigned char *key_buffer,
+                               struct qkd_metadata_s *metadata,
+                               uint32_t *status) {
     if (!key_stream_id || !index || !key_buffer || !status) {
         if (status)
             *status = QKD_STATUS_NO_CONNECTION;
-        return QKD_STATUS_NO_CONNECTION;
-    }
-
-    if (!py_qkd_client_instance) {
-        if (status) {
-            *status = QKD_STATUS_NO_CONNECTION;
-        }
         return QKD_STATUS_NO_CONNECTION;
     }
 
@@ -695,19 +682,12 @@ static uint32_t python_client_get_key(const unsigned char *key_stream_id,
     return status_value;
 }
 
-// Backend implementation for CLOSE
-static uint32_t python_client_close(const unsigned char *key_stream_id,
-                                    uint32_t *status) {
+// Backend implementation for CLOSE, called with the GIL held
+static uint32_t close_locked(const unsigned char *key_stream_id,
+                             uint32_t *status) {
     if (!key_stream_id || !status) {
         if (status)
             *status = QKD_STATUS_NO_CONNECTION;
-        return QKD_STATUS_NO_CONNECTION;
-    }
-
-    if (!py_qkd_client_instance) {
-        if (status) {
-            *status = QKD_STATUS_NO_CONNECTION;
-        }
         return QKD_STATUS_NO_CONNECTION;
     }
 
@@ -744,6 +724,49 @@ static uint32_t python_client_close(const unsigned char *key_stream_id,
         *status = status_value;
     }
     return status_value;
+}
+
+// The host may call from any thread or embed Python itself, so every call
+// into the interpreter holds the GIL.
+static uint32_t python_client_open_connect(const char *source,
+                                           const char *destination,
+                                           struct qkd_qos_s *qos,
+                                           unsigned char *key_stream_id,
+                                           uint32_t *status) {
+    if (!initialize_python())
+        return no_connection(status);
+
+    PyGILState_STATE gil = PyGILState_Ensure();
+    uint32_t result =
+        open_connect_locked(source, destination, qos, key_stream_id, status);
+    PyGILState_Release(gil);
+    return result;
+}
+
+static uint32_t python_client_get_key(const unsigned char *key_stream_id,
+                                      uint32_t *index,
+                                      unsigned char *key_buffer,
+                                      struct qkd_metadata_s *metadata,
+                                      uint32_t *status) {
+    if (!py_qkd_client_instance)
+        return no_connection(status);
+
+    PyGILState_STATE gil = PyGILState_Ensure();
+    uint32_t result =
+        get_key_locked(key_stream_id, index, key_buffer, metadata, status);
+    PyGILState_Release(gil);
+    return result;
+}
+
+static uint32_t python_client_close(const unsigned char *key_stream_id,
+                                    uint32_t *status) {
+    if (!py_qkd_client_instance)
+        return no_connection(status);
+
+    PyGILState_STATE gil = PyGILState_Ensure();
+    uint32_t result = close_locked(key_stream_id, status);
+    PyGILState_Release(gil);
+    return result;
 }
 
 // Export the backend interface
