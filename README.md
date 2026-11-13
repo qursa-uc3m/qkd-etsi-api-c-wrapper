@@ -206,6 +206,16 @@ This script:
 - Installs it to `~/.local/lib/qkd/qkd_client.py`
 - Creates a `.pth` file in your user's site-packages directory to make the module importable
 
+The `.pth` file only applies to your user's Python. When the library runs
+under another user (for example a root daemon) or inside a virtual
+environment, point it at the module directory instead:
+
+```bash
+export QKD_PYTHON_CLIENT_PATH=$HOME/.local/lib/qkd
+```
+
+Without this variable the library also searches `/usr/local/lib/qkd`.
+
 Clone and set up the QUBIP server (required for tests):
 
 ```bash

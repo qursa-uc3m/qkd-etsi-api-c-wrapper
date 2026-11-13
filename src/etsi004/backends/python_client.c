@@ -12,6 +12,7 @@
 
 #include <Python.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "debug.h"
@@ -61,8 +62,10 @@ static bool load_client(void) {
     }
 
     // Add the qkd module directory to the path
+    const char *client_path = getenv("QKD_PYTHON_CLIENT_PATH");
     PyObject *sys_path = PyObject_GetAttrString(sys_module, "path");
-    PyObject *path_str = PyUnicode_FromString("/usr/local/lib/qkd");
+    PyObject *path_str = PyUnicode_DecodeFSDefault(
+        client_path ? client_path : "/usr/local/lib/qkd");
     if (!sys_path || !PyList_Check(sys_path) || !path_str ||
         PyList_Append(sys_path, path_str) != 0) {
         PyErr_Print();
