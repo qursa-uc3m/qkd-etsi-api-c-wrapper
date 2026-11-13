@@ -234,6 +234,12 @@ function(configure_api_target target api)
         ENABLE_ETSI${api}
     )
     target_link_libraries(${target} PUBLIC ${COMMON_LINK_LIBRARIES})
+    # In a dual-API build both libraries export simulated_backend and
+    # GET_KEY. Bind references inside each library to its own definitions
+    # so loading both in one process does not mix them up.
+    if(ENABLE_ETSI004 AND ENABLE_ETSI014 AND UNIX AND NOT APPLE)
+        target_link_libraries(${target} PRIVATE "-Wl,-Bsymbolic")
+    endif()
 
     if(api STREQUAL "004")
         target_include_directories(${target} PUBLIC ${ETSI004_INCLUDES})
