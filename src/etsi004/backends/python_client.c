@@ -256,8 +256,11 @@ static uint32_t python_client_open_connect(const char *source,
                                            struct qkd_qos_s *qos,
                                            unsigned char *key_stream_id,
                                            uint32_t *status) {
-    if (!source || !destination || !qos || !key_stream_id || !status)
+    if (!source || !destination || !qos || !key_stream_id || !status) {
+        if (status)
+            *status = QKD_STATUS_NO_CONNECTION;
         return QKD_STATUS_NO_CONNECTION;
+    }
 
     // Initialize Python and QKD client if not already done
     if (!initialize_python()) {
@@ -341,14 +344,20 @@ static uint32_t python_client_open_connect(const char *source,
     Py_DECREF(py_args);
     Py_DECREF(py_connect_method);
 
+    // connect() reports failures through its return value, not exceptions
+    uint32_t connect_status = QKD_STATUS_SUCCESS;
     if (!py_connect_result) {
         PyErr_Print();
-        if (status) {
-            *status = QKD_STATUS_PEER_NOT_CONNECTED;
-        }
-        return QKD_STATUS_PEER_NOT_CONNECTED;
+        connect_status = QKD_STATUS_NO_CONNECTION;
+    } else if (PyLong_Check(py_connect_result) &&
+               !python_to_uint32(py_connect_result, &connect_status)) {
+        connect_status = QKD_STATUS_NO_CONNECTION;
     }
-    Py_DECREF(py_connect_result);
+    Py_XDECREF(py_connect_result);
+    if (connect_status != QKD_STATUS_SUCCESS) {
+        *status = connect_status;
+        return connect_status;
+    }
 
     // CRITICAL FIX: Convert the input key_stream_id to a Python UUID object
     PyObject *py_key_stream_id = NULL;
@@ -538,8 +547,11 @@ static uint32_t python_client_get_key(const unsigned char *key_stream_id,
                                       unsigned char *key_buffer,
                                       struct qkd_metadata_s *metadata,
                                       uint32_t *status) {
-    if (!key_stream_id || !index || !key_buffer || !status)
+    if (!key_stream_id || !index || !key_buffer || !status) {
+        if (status)
+            *status = QKD_STATUS_NO_CONNECTION;
         return QKD_STATUS_NO_CONNECTION;
+    }
 
     if (!py_qkd_client_instance) {
         if (status) {
@@ -686,8 +698,11 @@ static uint32_t python_client_get_key(const unsigned char *key_stream_id,
 // Backend implementation for CLOSE
 static uint32_t python_client_close(const unsigned char *key_stream_id,
                                     uint32_t *status) {
-    if (!key_stream_id || !status)
+    if (!key_stream_id || !status) {
+        if (status)
+            *status = QKD_STATUS_NO_CONNECTION;
         return QKD_STATUS_NO_CONNECTION;
+    }
 
     if (!py_qkd_client_instance) {
         if (status) {
@@ -713,10 +728,8 @@ static uint32_t python_client_close(const unsigned char *key_stream_id,
 
     if (!py_close_result) {
         PyErr_Print();
-        if (status) {
-            *status = QKD_STATUS_PEER_NOT_CONNECTED;
-        }
-        return QKD_STATUS_PEER_NOT_CONNECTED;
+        *status = QKD_STATUS_NO_CONNECTION;
+        return QKD_STATUS_NO_CONNECTION;
     }
 
     uint32_t status_value = QKD_STATUS_SUCCESS;
