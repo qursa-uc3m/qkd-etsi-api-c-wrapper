@@ -27,7 +27,6 @@
 #ifdef QKD_USE_ETSI014_BACKEND
 
 #define MAX_KEYS 1024
-#define DEFAULT_KEY_SIZE 256
 #define CONNECT_TIMEOUT_SECONDS 10L
 #define REQUEST_TIMEOUT_SECONDS 30L
 #define MAX_RESPONSE_SIZE (16U * 1024U * 1024U)
@@ -457,18 +456,24 @@ static uint32_t get_key(const char *kme_hostname, const char *slave_sae_id,
             request->additional_SAE_count > 0 || request->extension_mandatory)
             return QKD_STATUS_BAD_REQUEST;
     }
-    int32_t number = request && request->number > 0 ? request->number : 1;
-    int32_t size =
-        request && request->size > 0 ? request->size : DEFAULT_KEY_SIZE;
-    if (number <= 0 || number > MAX_KEYS || size <= 0)
+    // Parameters left at 0 are not sent, so the KME applies its defaults:
+    // one key of the key_size it reports in GET_STATUS.
+    int32_t number = request ? request->number : 0;
+    int32_t size = request ? request->size : 0;
+    if (number > MAX_KEYS)
         return QKD_STATUS_BAD_REQUEST;
 
-    char suffix[96];
-    int suffix_length =
-        snprintf(suffix, sizeof(suffix),
-                 "enc_keys?number=%" PRId32 "&size=%" PRId32, number, size);
-    if (suffix_length < 0 || (size_t)suffix_length >= sizeof(suffix))
-        return QKD_STATUS_BAD_REQUEST;
+    char suffix[64] = "enc_keys";
+    const char *separator = "?";
+    size_t used = strlen(suffix);
+    if (number > 0) {
+        used += (size_t)snprintf(suffix + used, sizeof(suffix) - used,
+                                 "%snumber=%" PRId32, separator, number);
+        separator = "&";
+    }
+    if (size > 0)
+        snprintf(suffix + used, sizeof(suffix) - used, "%ssize=%" PRId32,
+                 separator, size);
 
     char *url = build_url(kme_hostname, slave_sae_id, suffix);
     if (!url)
