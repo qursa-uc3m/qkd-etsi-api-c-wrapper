@@ -15,6 +15,10 @@
 
 #include <stdint.h>
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 /* Response codes as per section 5 */
 #define QKD_STATUS_OK 200
 #define QKD_STATUS_BAD_REQUEST 400
@@ -112,5 +116,9 @@ uint32_t GET_KEY_WITH_IDS(const char *kme_hostname, const char *master_sae_id,
  */
 void qkd_status_free(qkd_status_t *status);
 void qkd_key_container_free(qkd_key_container_t *container);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* QKD_ETSI014_API_H */

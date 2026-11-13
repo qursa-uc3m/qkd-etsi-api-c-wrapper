@@ -13,6 +13,10 @@
  #cmakedefine01 QKD_USE_CERBERIS_XGR
  #cmakedefine01 QKD_USE_SIMULATED
  #cmakedefine01 QKD_USE_PYTHON_CLIENT
+
+ #if QKD_USE_QUKAYDEE || QKD_USE_CERBERIS_XGR
+ #define QKD_USE_ETSI014_BACKEND 1
+ #endif
  
  #if QKD_USE_QUKAYDEE
  #define QKD_BACKEND_TYPE "qukaydee"

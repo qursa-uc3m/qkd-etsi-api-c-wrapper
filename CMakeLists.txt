@@ -51,6 +51,7 @@ if(ENABLE_ETSI014 AND QKD_BACKEND STREQUAL "python_client")
 endif()
 
 find_package(OpenSSL REQUIRED)
+find_package(Threads REQUIRED)
 if(ENABLE_ETSI014 AND (QKD_BACKEND STREQUAL "cerberis_xgr" OR QKD_BACKEND STREQUAL "qukaydee"))
     find_package(CURL REQUIRED)
     find_package(PkgConfig REQUIRED)
@@ -207,6 +208,7 @@ endif()
 set(COMMON_LINK_LIBRARIES
     OpenSSL::Crypto
     OpenSSL::SSL
+    Threads::Threads
 )
 
 if(QKD_BACKEND STREQUAL "python_client")
@@ -234,6 +236,12 @@ function(configure_api_target target api)
         ENABLE_ETSI${api}
     )
     target_link_libraries(${target} PUBLIC ${COMMON_LINK_LIBRARIES})
+    # In a dual-API build both libraries export simulated_backend and
+    # GET_KEY. Bind references inside each library to its own definitions
+    # so loading both in one process does not mix them up.
+    if(ENABLE_ETSI004 AND ENABLE_ETSI014 AND UNIX AND NOT APPLE)
+        target_link_libraries(${target} PRIVATE "-Wl,-Bsymbolic")
+    endif()
 
     if(api STREQUAL "004")
         target_include_directories(${target} PUBLIC ${ETSI004_INCLUDES})
@@ -280,14 +288,21 @@ if(BUILD_TESTS)
     
     # ETSI004 tests - only build if ETSI004 is enabled
     if(ENABLE_ETSI004)
+        if(QKD_BACKEND STREQUAL "python_client")
+            # Needs a running QUBIP server, skipped when it is not configured
+            set(ETSI004_TEST_SOURCE tests/etsi004/python_client_test.c)
+        else()
+            set(ETSI004_TEST_SOURCE tests/etsi004/api_test.c)
+        endif()
         add_executable(etsi004_test
-            tests/etsi004/api_test.c
+            ${ETSI004_TEST_SOURCE}
         )
         target_link_libraries(etsi004_test
             PRIVATE
             ${ETSI004_TARGET}
         )
         add_test(NAME etsi004_test COMMAND etsi004_test)
+        set_tests_properties(etsi004_test PROPERTIES SKIP_RETURN_CODE 77)
     endif()
     
     # ETSI014 tests - only build if ETSI014 is enabled

@@ -14,6 +14,7 @@
 #include <openssl/crypto.h>
 #include <openssl/evp.h>
 #include <openssl/rand.h>
+#include <pthread.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdlib.h>
@@ -40,6 +41,7 @@ struct stored_key {
 
 static struct stored_key key_store[MAX_KEYS];
 static int32_t stored_keys;
+static pthread_mutex_t key_store_lock = PTHREAD_MUTEX_INITIALIZER;
 
 static char *base64_encode(const unsigned char *input, size_t length) {
     if (length > INT_MAX)
@@ -242,10 +244,42 @@ static uint32_t sim_get_key_with_ids(const char *kme_hostname,
     return QKD_STATUS_OK;
 }
 
-const struct qkd_014_backend simulated_backend = {.name = "simulated",
-                                                  .get_status = sim_get_status,
-                                                  .get_key = sim_get_key,
-                                                  .get_key_with_ids =
-                                                      sim_get_key_with_ids};
+/* Hosts call in from several threads; the key store is shared by all. */
+static uint32_t locked_get_status(const char *kme_hostname,
+                                  const char *slave_sae_id,
+                                  qkd_status_t *status) {
+    pthread_mutex_lock(&key_store_lock);
+    uint32_t result = sim_get_status(kme_hostname, slave_sae_id, status);
+    pthread_mutex_unlock(&key_store_lock);
+    return result;
+}
+
+static uint32_t locked_get_key(const char *kme_hostname,
+                               const char *slave_sae_id,
+                               qkd_key_request_t *request,
+                               qkd_key_container_t *container) {
+    pthread_mutex_lock(&key_store_lock);
+    uint32_t result =
+        sim_get_key(kme_hostname, slave_sae_id, request, container);
+    pthread_mutex_unlock(&key_store_lock);
+    return result;
+}
+
+static uint32_t locked_get_key_with_ids(const char *kme_hostname,
+                                        const char *master_sae_id,
+                                        qkd_key_ids_t *key_ids,
+                                        qkd_key_container_t *container) {
+    pthread_mutex_lock(&key_store_lock);
+    uint32_t result =
+        sim_get_key_with_ids(kme_hostname, master_sae_id, key_ids, container);
+    pthread_mutex_unlock(&key_store_lock);
+    return result;
+}
+
+const struct qkd_014_backend simulated_backend = {
+    .name = "simulated",
+    .get_status = locked_get_status,
+    .get_key = locked_get_key,
+    .get_key_with_ids = locked_get_key_with_ids};
 
 #endif /* QKD_USE_SIMULATED */

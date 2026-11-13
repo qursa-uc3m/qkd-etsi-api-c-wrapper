@@ -15,6 +15,7 @@
 #define QKD_ETSI014_SIMULATED_H_
 
 #include "etsi014/api.h"
+#include "qkd_config.h"
 
 #if defined(QKD_USE_SIMULATED) && QKD_USE_SIMULATED
 

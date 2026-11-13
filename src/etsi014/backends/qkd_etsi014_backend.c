@@ -13,6 +13,8 @@
 #include <inttypes.h>
 #include <jansson.h>
 #include <limits.h>
+#include <openssl/crypto.h>
+#include <pthread.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -27,7 +29,6 @@
 #ifdef QKD_USE_ETSI014_BACKEND
 
 #define MAX_KEYS 1024
-#define DEFAULT_KEY_SIZE 256
 #define CONNECT_TIMEOUT_SECONDS 10L
 #define REQUEST_TIMEOUT_SECONDS 30L
 #define MAX_RESPONSE_SIZE (16U * 1024U * 1024U)
@@ -36,6 +37,20 @@ struct memory_buffer {
     char *data;
     size_t size;
 };
+
+static pthread_once_t curl_once = PTHREAD_ONCE_INIT;
+static CURLcode curl_init_result = CURLE_FAILED_INIT;
+
+static void init_curl(void) {
+    curl_init_result = curl_global_init(CURL_GLOBAL_DEFAULT);
+}
+
+// curl_easy_init() would run curl_global_init() itself, which is not
+// thread-safe on older libcurl. Do it exactly once instead.
+static bool ensure_curl(void) {
+    pthread_once(&curl_once, init_curl);
+    return curl_init_result == CURLE_OK;
+}
 
 int init_cert_config(int role, etsi014_cert_config_t *config) {
     if (!config || (role != 0 && role != 1))
@@ -72,15 +87,27 @@ static size_t write_memory_callback(void *contents, size_t size, size_t nmemb,
     if (received > MAX_RESPONSE_SIZE - buffer->size)
         return 0;
 
-    char *new_data = realloc(buffer->data, buffer->size + received + 1U);
+    // Grow by hand rather than with realloc() so that no copy of the key
+    // material is left behind unwiped.
+    char *new_data = malloc(buffer->size + received + 1U);
     if (!new_data)
         return 0;
+    memcpy(new_data, buffer->data, buffer->size);
+    OPENSSL_cleanse(buffer->data, buffer->size);
+    free(buffer->data);
 
     buffer->data = new_data;
     memcpy(buffer->data + buffer->size, contents, received);
     buffer->size += received;
     buffer->data[buffer->size] = '\0';
     return received;
+}
+
+static void free_response(char *response) {
+    if (!response)
+        return;
+    OPENSSL_cleanse(response, strlen(response));
+    free(response);
 }
 
 static bool get_json_int32(json_t *root, const char *name, int32_t *value) {
@@ -312,7 +339,8 @@ static char *build_post_data(const qkd_key_ids_t *key_ids,
 
 static char *build_url(const char *hostname, const char *sae_id,
                        const char *suffix) {
-    if (strncmp(hostname, "https://", sizeof("https://") - 1U) != 0)
+    if (strncmp(hostname, "https://", sizeof("https://") - 1U) != 0 ||
+        !ensure_curl())
         return NULL;
 
     CURL *curl = curl_easy_init();
@@ -344,7 +372,7 @@ static char *build_url(const char *hostname, const char *sae_id,
 static char *handle_request_https(const char *url, const char *post_data,
                                   long *http_code,
                                   const etsi014_cert_config_t *cert_config) {
-    if (!url || !http_code || !cert_config)
+    if (!url || !http_code || !cert_config || !ensure_curl())
         return NULL;
 
     *http_code = 0;
@@ -395,7 +423,7 @@ static char *handle_request_https(const char *url, const char *post_data,
     curl_easy_cleanup(curl);
     if (result != CURLE_OK) {
         QKD_DBG_ERR("HTTPS request failed: %s", curl_easy_strerror(result));
-        free(response.data);
+        free_response(response.data);
         return NULL;
     }
     return response.data;
@@ -414,12 +442,12 @@ static uint32_t handle_keys_response(char *response, long http_code,
     if (!response)
         return QKD_STATUS_SERVER_ERROR;
     if (http_code < 200 || http_code >= 300) {
-        free(response);
+        free_response(response);
         return map_http_error(http_code);
     }
 
     int parsed = parse_response_to_qkd_keys(response, container);
-    free(response);
+    free_response(response);
     return parsed == 0 ? QKD_STATUS_OK : QKD_STATUS_SERVER_ERROR;
 }
 
@@ -457,18 +485,24 @@ static uint32_t get_key(const char *kme_hostname, const char *slave_sae_id,
             request->additional_SAE_count > 0 || request->extension_mandatory)
             return QKD_STATUS_BAD_REQUEST;
     }
-    int32_t number = request && request->number > 0 ? request->number : 1;
-    int32_t size =
-        request && request->size > 0 ? request->size : DEFAULT_KEY_SIZE;
-    if (number <= 0 || number > MAX_KEYS || size <= 0)
+    // Parameters left at 0 are not sent, so the KME applies its defaults:
+    // one key of the key_size it reports in GET_STATUS.
+    int32_t number = request ? request->number : 0;
+    int32_t size = request ? request->size : 0;
+    if (number > MAX_KEYS)
         return QKD_STATUS_BAD_REQUEST;
 
-    char suffix[96];
-    int suffix_length =
-        snprintf(suffix, sizeof(suffix),
-                 "enc_keys?number=%" PRId32 "&size=%" PRId32, number, size);
-    if (suffix_length < 0 || (size_t)suffix_length >= sizeof(suffix))
-        return QKD_STATUS_BAD_REQUEST;
+    char suffix[64] = "enc_keys";
+    const char *separator = "?";
+    size_t used = strlen(suffix);
+    if (number > 0) {
+        used += (size_t)snprintf(suffix + used, sizeof(suffix) - used,
+                                 "%snumber=%" PRId32, separator, number);
+        separator = "&";
+    }
+    if (size > 0)
+        snprintf(suffix + used, sizeof(suffix) - used, "%ssize=%" PRId32,
+                 separator, size);
 
     char *url = build_url(kme_hostname, slave_sae_id, suffix);
     if (!url)
