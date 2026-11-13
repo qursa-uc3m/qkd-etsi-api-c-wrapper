@@ -51,6 +51,7 @@ if(ENABLE_ETSI014 AND QKD_BACKEND STREQUAL "python_client")
 endif()
 
 find_package(OpenSSL REQUIRED)
+find_package(Threads REQUIRED)
 if(ENABLE_ETSI014 AND (QKD_BACKEND STREQUAL "cerberis_xgr" OR QKD_BACKEND STREQUAL "qukaydee"))
     find_package(CURL REQUIRED)
     find_package(PkgConfig REQUIRED)
@@ -207,6 +208,7 @@ endif()
 set(COMMON_LINK_LIBRARIES
     OpenSSL::Crypto
     OpenSSL::SSL
+    Threads::Threads
 )
 
 if(QKD_BACKEND STREQUAL "python_client")

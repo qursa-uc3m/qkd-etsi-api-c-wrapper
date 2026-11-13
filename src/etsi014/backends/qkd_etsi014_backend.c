@@ -14,6 +14,7 @@
 #include <jansson.h>
 #include <limits.h>
 #include <openssl/crypto.h>
+#include <pthread.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -36,6 +37,20 @@ struct memory_buffer {
     char *data;
     size_t size;
 };
+
+static pthread_once_t curl_once = PTHREAD_ONCE_INIT;
+static CURLcode curl_init_result = CURLE_FAILED_INIT;
+
+static void init_curl(void) {
+    curl_init_result = curl_global_init(CURL_GLOBAL_DEFAULT);
+}
+
+// curl_easy_init() would run curl_global_init() itself, which is not
+// thread-safe on older libcurl. Do it exactly once instead.
+static bool ensure_curl(void) {
+    pthread_once(&curl_once, init_curl);
+    return curl_init_result == CURLE_OK;
+}
 
 int init_cert_config(int role, etsi014_cert_config_t *config) {
     if (!config || (role != 0 && role != 1))
@@ -324,7 +339,8 @@ static char *build_post_data(const qkd_key_ids_t *key_ids,
 
 static char *build_url(const char *hostname, const char *sae_id,
                        const char *suffix) {
-    if (strncmp(hostname, "https://", sizeof("https://") - 1U) != 0)
+    if (strncmp(hostname, "https://", sizeof("https://") - 1U) != 0 ||
+        !ensure_curl())
         return NULL;
 
     CURL *curl = curl_easy_init();
@@ -356,7 +372,7 @@ static char *build_url(const char *hostname, const char *sae_id,
 static char *handle_request_https(const char *url, const char *post_data,
                                   long *http_code,
                                   const etsi014_cert_config_t *cert_config) {
-    if (!url || !http_code || !cert_config)
+    if (!url || !http_code || !cert_config || !ensure_curl())
         return NULL;
 
     *http_code = 0;
